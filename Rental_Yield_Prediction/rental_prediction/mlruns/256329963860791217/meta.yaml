@@ -1,0 +1,6 @@
+artifact_location: file:///app/mlruns/256329963860791217
+creation_time: 1741702218750
+experiment_id: '256329963860791217'
+last_update_time: 1741702218750
+lifecycle_stage: active
+name: rental_prediction
