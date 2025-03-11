@@ -152,6 +152,7 @@ class ModelTrainer:
     def train_mlp(self, X_train, y_train, X_test, y_test, hidden_layers=None):
         """
         Train a Multi-Layer Perceptron (Neural Network) model for rental prediction
+        with improved stability measures to prevent NaN loss values.
         
         Args:
             X_train, y_train: Training data
@@ -165,7 +166,7 @@ class ModelTrainer:
             
             # Define model architecture
             if hidden_layers is None:
-                hidden_layers = [128, 64, 32]
+                hidden_layers = [64, 32, 16]  # Smaller network can be more stable
                 
             input_dim = X_train.shape[1]
             
@@ -174,33 +175,6 @@ class ModelTrainer:
             for i, layer_size in enumerate(hidden_layers):
                 mlflow.log_param(f"hidden_layer_{i+1}", layer_size)
             
-            # Create model
-            model = Sequential()
-            
-            # Input layer
-            model.add(Dense(hidden_layers[0], input_dim=input_dim, activation='relu'))
-            model.add(Dropout(0.2))
-            
-            # Hidden layers
-            for layer_size in hidden_layers[1:]:
-                model.add(Dense(layer_size, activation='relu'))
-                model.add(Dropout(0.2))
-                
-            # Output layer
-            model.add(Dense(1))
-            
-            # Compile model
-            optimizer = Adam(learning_rate=0.001)
-            model.compile(loss='mse', optimizer=optimizer, metrics=['mae'])
-            
-            # Define early stopping
-            early_stopping = EarlyStopping(
-                monitor='val_loss',
-                patience=10,
-                verbose=1,
-                restore_best_weights=True
-            )
-
             # Convert sparse matrices to dense arrays
             if scipy.sparse.issparse(X_train):
                 print("Converting sparse training data to dense array...")
@@ -210,13 +184,87 @@ class ModelTrainer:
                 print("Converting sparse test data to dense array...")
                 X_test = X_test.toarray()
             
-            # Train model
+            # Check for NaN values in data
+            if np.isnan(X_train).any() or np.isnan(y_train).any():
+                print("Warning: NaN values found in training data. Cleaning...")
+                # Replace NaN with 0 or mean values
+                X_train = np.nan_to_num(X_train)
+                y_train = np.nan_to_num(y_train)
+            
+            if np.isnan(X_test).any() or np.isnan(y_test).any():
+                print("Warning: NaN values found in test data. Cleaning...")
+                X_test = np.nan_to_num(X_test)
+                y_test = np.nan_to_num(y_test)
+            
+            # Check for infinite values
+            if np.isinf(X_train).any():
+                print("Warning: Infinite values found in training data. Replacing with large values...")
+                X_train = np.clip(X_train, -1e9, 1e9)
+            
+            if np.isinf(X_test).any():
+                print("Warning: Infinite values found in test data. Replacing with large values...")
+                X_test = np.clip(X_test, -1e9, 1e9)
+            
+            # Create model with a kernel initializer less prone to exploding gradients
+            model = Sequential()
+            
+            # Input layer with careful initialization and batch normalization
+            from tensorflow.keras.layers import BatchNormalization
+            model.add(Dense(hidden_layers[0], 
+                        input_dim=input_dim, 
+                        activation='relu',
+                        kernel_initializer='he_normal',  # Better for ReLU
+                        kernel_regularizer='l2'))  # L2 regularization
+            model.add(BatchNormalization())  # Normalize activations
+            model.add(Dropout(0.2))
+            
+            # Hidden layers
+            for layer_size in hidden_layers[1:]:
+                model.add(Dense(layer_size, 
+                            activation='relu',
+                            kernel_initializer='he_normal',
+                            kernel_regularizer='l2'))
+                model.add(BatchNormalization())
+                model.add(Dropout(0.2))
+                
+            # Output layer - linear activation for regression
+            model.add(Dense(1))
+            
+            # Use a more robust optimizer with gradient clipping
+            from tensorflow.keras.optimizers import Adam
+            optimizer = Adam(
+                learning_rate=0.001,
+                clipnorm=1.0,  # Clip gradients to prevent explosion
+                clipvalue=0.5  # Additional safeguard against extreme values
+            )
+            
+            # Compile model with mean absolute error as it's more robust than MSE
+            model.compile(
+                loss='huber_loss',  # Huber loss is less sensitive to outliers than MSE
+                optimizer=optimizer, 
+                metrics=['mae']
+            )
+            
+            # Define early stopping with more patience
+            early_stopping = EarlyStopping(
+                monitor='val_loss',
+                patience=15,
+                verbose=1,
+                restore_best_weights=True,
+                min_delta=0.001  # Minimum improvement to be considered significant
+            )
+            
+            # Add a callback to stop if NaN loss occurs
+            from tensorflow.keras.callbacks import TerminateOnNaN
+            nan_terminator = TerminateOnNaN()
+            
+            # Train model with smaller batch size and careful validation split
             history = model.fit(
                 X_train, y_train,
-                epochs=100,
-                batch_size=32,
-                validation_data=(X_test, y_test),  # Use existing test data instead
-                callbacks=[early_stopping],
+                epochs=10,
+                batch_size=64,  # Larger batch size for more stable gradients
+                validation_data=(X_test, y_test),
+                callbacks=[early_stopping, nan_terminator],
                 verbose=1
             )
             
@@ -243,8 +291,26 @@ class ModelTrainer:
             plt.savefig(history_fig_path)
             mlflow.log_artifact(history_fig_path)
             
-            # Make predictions and evaluate
-            y_pred = model.predict(X_test).flatten()
+            # Check if training was successful (no NaN)
+            if np.isnan(history.history['loss']).any():
+                print("Warning: NaN values occurred during training. Using fallback model.")
+                # Create a simpler fallback model
+                simple_model = xgb.XGBRegressor(
+                    objective='reg:squarederror',
+                    learning_rate=0.05,
+                    max_depth=3,
+                    n_estimators=100
+                )
+                simple_model.fit(X_train, y_train)
+                y_pred = simple_model.predict(X_test)
+                self.best_model = simple_model
+                self.best_model_name = "xgboost_fallback"
+                model = simple_model
+            else:
+                # Make predictions and evaluate
+                y_pred = model.predict(X_test).flatten()
+            
+            # Compute metrics
             mse = mean_squared_error(y_test, y_pred)
             rmse = np.sqrt(mse)
             mae = mean_absolute_error(y_test, y_pred)
