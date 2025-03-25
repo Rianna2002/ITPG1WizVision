@@ -11,3 +11,5 @@ scikit-learn==1.6.1
 seaborn==0.13.2
 streamlit==1.42.2
 xgboost==2.1.4
+mlflow
+boto3

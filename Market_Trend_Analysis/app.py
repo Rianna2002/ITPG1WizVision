@@ -9,8 +9,12 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error
-import joblib
-import pickle
+import mlflow
+import mlflow.sklearn
+
+mlflow.set_tracking_uri("http://localhost:5000")  # If running locally
+# mlflow.set_tracking_uri("http://mlflow-ecs-tracking.amazonaws.com")  # If using AWS ECS
+mlflow.set_experiment("Resale_Flat_Price_Prediction")
 
 # Streamlit App Title
 st.title("📊 Resale Flat Price Prediction & Analysis")
@@ -65,38 +69,60 @@ X = df.drop(columns=['resale_price', 'block'])
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # Convert 'remaining_lease' to numeric
-X_train['remaining_lease'] = X_train['remaining_lease'].astype(str).str.extract('(\d+)').astype(float)
-X_test['remaining_lease'] = X_test['remaining_lease'].astype(str).str.extract('(\d+)').astype(float)
+X_train['remaining_lease'] = X_train['remaining_lease'].astype(str).str.extract(r'(\d+)').astype(float)
+X_test['remaining_lease'] = X_test['remaining_lease'].astype(str).str.extract(r'(\d+)').astype(float)
 
 # Train Models (Only Runs Once - Cache for Performance)
 @st.cache_resource
 def train_models():
-    # XGBoost Model
-    XGB_model = XGBRegressor(
-        n_estimators=1200, learning_rate=0.05, max_depth=11, subsample=0.9,
-        colsample_bytree=0.9, gamma=0.1, reg_lambda=0.7, reg_alpha=0.3, random_state=42
-    )
-    XGB_model.fit(X_train, y_train)
-    XGB_y_pred = XGB_model.predict(X_test)
-    XGB_mae = mean_absolute_error(y_test, XGB_y_pred)
+    with mlflow.start_run():
+        # XGBoost Model
+        with mlflow.start_run(nested=True, run_name="XGBoost_Model"):
+            XGB_model = XGBRegressor(
+                n_estimators=1200, learning_rate=0.05, max_depth=11, subsample=0.9,
+                colsample_bytree=0.9, gamma=0.1, reg_lambda=0.7, reg_alpha=0.3, random_state=42
+            )
+            XGB_model.fit(X_train, y_train)
+            XGB_y_pred = XGB_model.predict(X_test)
+            XGB_mae = mean_absolute_error(y_test, XGB_y_pred)
 
-    # LightGBM Model
-    LGBM_model = LGBMRegressor(
-        n_estimators=1200, learning_rate=0.05, max_depth=11, subsample=0.9,
-        colsample_bytree=0.9, min_gain_to_split=0.1, reg_lambda=0.7, reg_alpha=0.3, random_state=42
-    )
-    LGBM_model.fit(X_train, y_train)
-    LGBM_y_pred = LGBM_model.predict(X_test)
-    LGBM_mae = mean_absolute_error(y_test, LGBM_y_pred)
+            # Create an input example
+            input_example = X_test.iloc[:1]  # Take first row as example
 
-    # Random Forest Model
-    RF_model = RandomForestRegressor(
-        n_estimators=1200, max_depth=11, max_features=0.9,
-        min_samples_split=2, min_samples_leaf=1, bootstrap=True, random_state=42
-    )
-    RF_model.fit(X_train, y_train)
-    RF_y_pred = RF_model.predict(X_test)
-    RF_mae = mean_absolute_error(y_test, RF_y_pred)
+            # Log model and metrics
+            mlflow.log_param("model_type", "XGBoost")
+            mlflow.log_metric("MAE", XGB_mae)
+            mlflow.sklearn.log_model(XGB_model, "xgb_model", input_example=input_example)
+
+        # LightGBM Model
+        with mlflow.start_run(nested=True, run_name="LightGBM_Model"):
+            LGBM_model = LGBMRegressor(
+                n_estimators=1200, learning_rate=0.05, max_depth=11, subsample=0.9,
+                colsample_bytree=0.9, min_gain_to_split=0.1, reg_lambda=0.7, reg_alpha=0.3, random_state=42
+            )
+            LGBM_model.fit(X_train, y_train)
+            LGBM_y_pred = LGBM_model.predict(X_test)
+            LGBM_mae = mean_absolute_error(y_test, LGBM_y_pred)
+
+            # Log model with input example
+            mlflow.log_param("model_type", "LightGBM")
+            mlflow.log_metric("MAE", LGBM_mae)
+            mlflow.sklearn.log_model(LGBM_model, "lgbm_model", input_example=input_example)
+
+        # Random Forest Model
+        with mlflow.start_run(nested=True, run_name="RandomForest_Model"):
+            RF_model = RandomForestRegressor(
+                n_estimators=1200, max_depth=11, max_features=0.9,
+                min_samples_split=2, min_samples_leaf=1, bootstrap=True, random_state=42
+            )
+            RF_model.fit(X_train, y_train)
+            RF_y_pred = RF_model.predict(X_test)
+            RF_mae = mean_absolute_error(y_test, RF_y_pred)
+
+            # Log model with input example
+            mlflow.log_param("model_type", "RandomForest")
+            mlflow.log_metric("MAE", RF_mae)
+            mlflow.sklearn.log_model(RF_model, "rf_model", input_example=input_example)
 
     return XGB_model, XGB_mae, XGB_y_pred, LGBM_model, LGBM_mae, LGBM_y_pred, RF_model, RF_mae, RF_y_pred
 
