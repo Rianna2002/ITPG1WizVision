@@ -1,28 +1,18 @@
-# Use Python base image
-FROM python:3.11  
+# Use official Python image
+FROM python:3.11-slim
 
-# Set the working directory inside the container
-WORKDIR /app  
+# Set working directory in container
+WORKDIR /app
 
-# Copy application files into the container
-COPY . /app  
+# Copy requirements and app files into container
+COPY requirements.txt ./
+COPY . .
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y sqlite3  
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install required libraries
-RUN pip install --no-cache-dir -r requirements.txt  
+# Expose the port Streamlit runs on
+EXPOSE 8501
 
-# Install MLflow and AWS SDK
-RUN pip install mlflow boto3  
-
-# Expose ports for both Streamlit and MLflow
-EXPOSE 5000 8501  
-
-# Set environment variables for MLflow & AWS
-ENV MLFLOW_S3_ENDPOINT_URL=https://s3.amazonaws.com
-
-# Run MLflow server and Streamlit together
-CMD ["sh", "-c", "mlflow server --backend-store-uri sqlite:///mlflow.db \
-    --default-artifact-root s3://aai-mta-mlflow-artifacts-bucket \
-    --host 0.0.0.0 --port 5000 & streamlit run app.py --server.port=8501 --server.address=0.0.0.0"]
+# Run the Streamlit app
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
