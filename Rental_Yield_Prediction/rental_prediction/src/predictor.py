@@ -18,7 +18,7 @@ class RentalPredictor:
         Args:
             preprocessor: Fitted data preprocessor
             model: Trained model
-            model_type (str): Type of model ('xgboost', 'mlp', etc.)
+            model_type (str): Type of model ('xgboost', 'lstm', 'arima')
         """
         self.preprocessor = preprocessor
         self.model = model
@@ -30,7 +30,7 @@ class RentalPredictor:
         
         Args:
             run_id (str): MLflow run ID
-            model_type (str): Type of model ('xgboost', 'mlp', etc.)
+            model_type (str): Type of model ('xgboost', 'lstm', 'arima')
             
         Returns:
             bool: True if successful, False otherwise
@@ -39,9 +39,12 @@ class RentalPredictor:
             if model_type == "xgboost":
                 model_path = f"runs:/{run_id}/xgboost_model"
                 self.model = mlflow.xgboost.load_model(model_path)
-            elif model_type == "mlp":
-                model_path = f"runs:/{run_id}/mlp_model"
+            elif model_type == "lstm":
+                model_path = f"runs:/{run_id}/lstm_model"
                 self.model = mlflow.keras.load_model(model_path)
+            elif model_type == "arima":
+                model_path = f"runs:/{run_id}/arima_model"
+                self.model = mlflow.sklearn.load_model(model_path)
             else:
                 model_path = f"runs:/{run_id}/{model_type}_model"
                 self.model = mlflow.sklearn.load_model(model_path)
@@ -59,7 +62,7 @@ class RentalPredictor:
         
         Args:
             model_path (str): Path to the saved model
-            model_type (str): Type of model ('xgboost', 'mlp', etc.)
+            model_type (str): Type of model ('xgboost', 'lstm', 'arima')
             preprocessor: Optional data preprocessor
             
         Returns:
@@ -95,11 +98,37 @@ class RentalPredictor:
         # Preprocess input data
         processed_input = self.preprocessor.preprocess_input(input_data)
         
-        # Make prediction
-        if self.model_type == "mlp":
-            prediction = self.model.predict(processed_input)[0][0]
-        else:
+        # Make prediction based on model type
+        if self.model_type == "xgboost":
             prediction = self.model.predict(processed_input)[0]
+        elif self.model_type == "lstm":
+            # Reshape input for LSTM [samples, timesteps, features]
+            lstm_input = processed_input.reshape((1, 1, processed_input.shape[1]))
+            prediction = self.model.predict(lstm_input)[0][0]
+        elif self.model_type == "arima":
+            # For ARIMA models loaded from statsmodels
+            try:
+                # Check if it's a simple statsmodels ARIMA results object
+                if hasattr(self.model, 'forecast'):
+                    # Direct forecast
+                    prediction = self.model.forecast(steps=1, exog=processed_input)[0]
+                # If it's our custom ARIMA dictionary from training
+                elif isinstance(self.model, dict) and 'model' in self.model:
+                    prediction = self.model['model'].forecast(steps=1, exog=processed_input)[0]
+                else:
+                    # Fallback - return mean value
+                    prediction = processed_input.mean()
+            except Exception as e:
+                print(f"Error predicting with ARIMA model: {e}")
+                # Fallback prediction
+                prediction = float(np.mean(processed_input))
+        else:
+            # Generic model
+            prediction = self.model.predict(processed_input)[0]
+        
+        # Ensure prediction is a scalar
+        if isinstance(prediction, (list, np.ndarray)):
+            prediction = float(prediction)
         
         return prediction
     
