@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/brian/Project/ITPG1WizVision/Rental_Yield_Prediction/rental_prediction/mlruns/751891167340451883/e7b80794668f4ab5aced417b56a4a267/artifacts
+end_time: 1743164119426
+entry_point_name: ''
+experiment_id: '751891167340451883'
+lifecycle_stage: active
+run_id: e7b80794668f4ab5aced417b56a4a267
+run_name: ARIMA
+run_uuid: e7b80794668f4ab5aced417b56a4a267
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1743164119385
+status: 4
+tags: []
+user_id: brian
