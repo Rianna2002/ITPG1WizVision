@@ -9,3 +9,4 @@ matplotlib==3.7.1
 joblib==1.2.0
 plotly==5.14.1
 scipy
+statsmodels
