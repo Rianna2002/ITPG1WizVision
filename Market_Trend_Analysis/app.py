@@ -5,9 +5,9 @@ import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 import mlflow
 
-mlflow.set_experiment("HDB_Market_Trend_Analysis")
+mlflow.set_experiment("AOP_Market_Trend_Analysis")
 
-st.set_page_config(page_title="HDB Market Trend Analysis Tool", layout="wide")
+st.set_page_config(page_title="AOP Market Trend Analysis Tool", layout="wide")
 
 # Load label encoders used during training
 town_classes = ['ANG MO KIO', 'BEDOK', 'BISHAN', 'BUKIT BATOK', 'BUKIT MERAH',
