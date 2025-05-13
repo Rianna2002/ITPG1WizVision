@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/brian/Project/ITPG1WizVision/Rental_Yield_Prediction/rental_prediction/mlruns/558606548001824553/122970aee8174ce6bff1f9fc66e7e2cc/artifacts
+end_time: 1747146336251
+entry_point_name: ''
+experiment_id: '558606548001824553'
+lifecycle_stage: active
+run_id: 122970aee8174ce6bff1f9fc66e7e2cc
+run_name: XGBoost
+run_uuid: 122970aee8174ce6bff1f9fc66e7e2cc
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1747146330955
+status: 3
+tags: []
+user_id: brian

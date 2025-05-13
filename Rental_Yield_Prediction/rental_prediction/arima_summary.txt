@@ -1,9 +1,9 @@
                                SARIMAX Results                                
 ==============================================================================
-Dep. Variable:           monthly_rent   No. Observations:               121533
+Dep. Variable:                      y   No. Observations:               121533
 Model:                 ARIMA(1, 0, 0)   Log Likelihood             -976957.313
-Date:                Fri, 28 Mar 2025   AIC                        1953920.627
-Time:                        20:18:57   BIC                        1953949.750
+Date:                Tue, 13 May 2025   AIC                        1953920.627
+Time:                        21:44:44   BIC                        1953949.750
 Sample:                             0   HQIC                       1953929.388
                              - 121533                                         
 Covariance Type:                  opg                                         

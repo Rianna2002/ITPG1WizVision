@@ -25,6 +25,15 @@ st.markdown("## Predict monthly rent based on property details")
 
 # Sidebar for navigation
 page = st.sidebar.selectbox("Select Page", ["Predict", "Train Model", "Model Performance"])
+# Add this in the sidebar or main area
+if st.button("🔄 Reset Models", key="reset_models"):
+    # Clear all model-related session state
+    st.session_state.predictors = {}
+    st.session_state.model_trained = False
+    st.session_state.model_loaded = False
+    st.session_state.data_processor = None
+    st.success("Models reset! Please retrain or reload your models.")
+    st.experimental_rerun()
 
 # Initialize session state variables if they don't exist
 if 'predictors' not in st.session_state:
@@ -47,22 +56,72 @@ def load_data(file_path):
         return None
 
 # Function to train model
-def train_model(data_processor, X_train, X_test, y_train, y_test, model_type, tune_hyperparams=False):
+# Replace the train_model function in app.py with this version that has more debugging:
+
+def train_model(data_processor, processed_data, model_type, tune_hyperparams=False):
+    """
+    Train model using the appropriate data for each model type
+    """
     trainer = ModelTrainer()
     
+    st.write(f"[DEBUG] Training {model_type.upper()} model...")
+    
     if model_type == "xgboost":
-        model = trainer.train_xgboost(X_train, y_train, X_test, y_test, tune_hyperparams=tune_hyperparams)
+        # XGBoost uses non-temporal data
+        X_train, X_test, y_train, y_test = processed_data['xgboost']
+        st.write(f"[DEBUG] XGBoost training data shape: {X_train.shape}")
+        st.write(f"[DEBUG] XGBoost features: Categorical only (no temporal)")
+        
+        model = trainer.train_xgboost(processed_data, tune_hyperparams=tune_hyperparams)
+        
+        # Test the model with different inputs
+        st.write("[DEBUG] Testing XGBoost with different towns...")
+        
+        # Create test inputs
+        test_cases = [
+            {'town': 'ANG MO KIO', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
+            {'town': 'BEDOK', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
+            {'town': 'CENTRAL', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
+        ]
+        
+        # Create predictor for testing
+        predictor = RentalPredictor(
+            preprocessor=data_processor,
+            model=model,
+            model_type="xgboost"
+        )
+        
+        st.write("[DEBUG] XGBoost Test Results:")
+        for i, test_case in enumerate(test_cases):
+            try:
+                prediction = predictor.predict(test_case)
+                st.write(f"  {test_case['town']}: S${prediction:.2f}")
+            except Exception as e:
+                st.error(f"  {test_case['town']}: Error - {e}")
+        
     elif model_type == "lstm":
-        model = trainer.train_lstm(X_train, y_train, X_test, y_test)
+        # LSTM uses temporal data
+        X_train, X_test, y_train, y_test = processed_data['temporal']
+        st.write(f"[DEBUG] LSTM training data shape: {X_train.shape}")
+        st.write(f"[DEBUG] LSTM features: Categorical + temporal")
+        
+        model = trainer.train_lstm(processed_data)
+        
     elif model_type == "arima":
-        model = trainer.train_arima(X_train, y_train, X_test, y_test)
+        # ARIMA uses temporal data
+        X_train, X_test, y_train, y_test = processed_data['temporal']
+        st.write(f"[DEBUG] ARIMA training data shape: {X_train.shape}")
+        st.write(f"[DEBUG] ARIMA features: Temporal focus")
+        
+        model = trainer.train_arima(processed_data)
+        
     else:
         st.error("Unsupported model type")
         return None
     
     best_model, best_model_name = trainer.get_best_model()
     
-    # Create predictor
+    # Create predictor with appropriate model type
     predictor = RentalPredictor(
         preprocessor=data_processor,
         model=best_model,
@@ -98,12 +157,15 @@ if page == "Predict":
     else:
         # Input form
         with st.form("prediction_form"):
-            # Get available towns and flat types from the data
+                        # Get available towns and flat types from the data
             data_path = "data/RentingOutofFlats2025.csv"
             if os.path.exists(data_path):
                 data = load_data(data_path)
                 towns = sorted(data['town'].unique())
                 flat_types = sorted(data['flat_type'].unique())
+                
+                # Debug: Print actual flat types in the data
+                print(f"[DEBUG] Actual flat types in data: {flat_types}")
             else:
                 towns = ["ANG MO KIO", "BEDOK", "BISHAN", "BUKIT BATOK", "BUKIT MERAH", "BUKIT PANJANG", 
                          "BUKIT TIMAH", "CENTRAL AREA", "CHOA CHU KANG", "CLEMENTI", "GEYLANG", "HOUGANG", 
@@ -221,7 +283,7 @@ elif page == "Train Model":
     with tab1:
         st.subheader("Train New Rental Prediction Models")
         
-        # Data upload or selection
+        # Data loading section
         data_path = "data/RentingOutofFlats2025.csv"
         
         if os.path.exists(data_path):
@@ -248,26 +310,35 @@ elif page == "Train Model":
             st.write(f"Dataset shape: {data.shape}")
             st.dataframe(data.head())
             
-            # Model selection (multi-select)
+            # Model selection
             model_types = st.multiselect(
                 "Select Models to Train", 
                 ["xgboost", "lstm", "arima"],
-                default=["xgboost"]
+                default=["xgboost"],
+                help="XGBoost uses categorical features only, LSTM and ARIMA use temporal features"
             )
+            
+            # Add information about feature usage
+            st.info("""
+            **Feature Usage by Model:**
+            - **XGBoost**: Uses categorical features (town, flat_type, block, street_name) only
+            - **LSTM**: Uses all features including temporal (month, year)
+            - **ARIMA**: Uses temporal features primarily
+            """)
             
             # Hyperparameter tuning option
             tune_hyperparams = st.checkbox("Tune Hyperparameters (XGBoost only)", value=False)
             
-            # Train model button
             if st.button("Train Selected Models"):
                 if not model_types:
                     st.error("Please select at least one model type to train.")
                 else:
-                    # Initialize data processor once for all models
+                    # Initialize data processor
                     data_processor = DataProcessor()
                     
-                    # Preprocess data once
-                    X_train, X_test, y_train, y_test = data_processor.preprocess_data(data)
+                    # Preprocess data once for all models
+                    with st.spinner("Preprocessing data for all models..."):
+                        processed_data = data_processor.preprocess_data(data)
                     
                     # Store data processor in session state
                     st.session_state.data_processor = data_processor
@@ -275,10 +346,10 @@ elif page == "Train Model":
                     # Train each selected model
                     for model_type in model_types:
                         with st.spinner(f"Training {model_type.upper()} model... This may take a while."):
-                            # Train model
+                            # Train model with appropriate data
                             predictor = train_model(
-                                data_processor, X_train, X_test, y_train, y_test, 
-                                model_type, tune_hyperparams if model_type == "xgboost" else False
+                                data_processor, processed_data, model_type, 
+                                tune_hyperparams if model_type == "xgboost" else False
                             )
                             
                             if predictor:
