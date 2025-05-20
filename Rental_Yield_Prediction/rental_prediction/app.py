@@ -2,10 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
-import mlflow
-import mlflow.xgboost
-import mlflow.keras
-import mlflow.sklearn
+import json
 import plotly.express as px
 import plotly.graph_objects as go
 from src.data_processor import DataProcessor
@@ -25,8 +22,9 @@ st.markdown("## Predict monthly rent based on property details")
 
 # Sidebar for navigation
 page = st.sidebar.selectbox("Select Page", ["Predict", "Train Model", "Model Performance"])
-# Add this in the sidebar or main area
-if st.button("🔄 Reset Models", key="reset_models"):
+
+# Add reset models button
+if st.sidebar.button("🔄 Reset Models", key="reset_models"):
     # Clear all model-related session state
     st.session_state.predictors = {}
     st.session_state.model_trained = False
@@ -55,9 +53,7 @@ def load_data(file_path):
         st.error(f"Error loading data: {e}")
         return None
 
-# Function to train model
-# Replace the train_model function in app.py with this version that has more debugging:
-
+# Function to train model without MLflow
 def train_model(data_processor, processed_data, model_type, tune_hyperparams=False):
     """
     Train model using the appropriate data for each model type
@@ -66,72 +62,129 @@ def train_model(data_processor, processed_data, model_type, tune_hyperparams=Fal
     
     st.write(f"[DEBUG] Training {model_type.upper()} model...")
     
-    if model_type == "xgboost":
-        # XGBoost uses non-temporal data
-        X_train, X_test, y_train, y_test = processed_data['xgboost']
-        st.write(f"[DEBUG] XGBoost training data shape: {X_train.shape}")
-        st.write(f"[DEBUG] XGBoost features: Categorical only (no temporal)")
+    try:
+        if model_type == "xgboost":
+            # XGBoost uses non-temporal data
+            X_train, X_test, y_train, y_test = processed_data['xgboost']
+            st.write(f"[DEBUG] XGBoost training data shape: {X_train.shape}")
+            st.write(f"[DEBUG] XGBoost features: Categorical only (no temporal)")
+            
+            model = trainer.train_xgboost(processed_data, tune_hyperparams=tune_hyperparams)
+            
+            # Create predictor for testing
+            predictor = RentalPredictor(
+                preprocessor=data_processor,
+                model=model,
+                model_type="xgboost"
+            )
+            
+            # Save the model explicitly
+            st.write("[DEBUG] Saving XGBoost model...")
+            model_path, preprocessor_path = predictor.save_model()
+            st.write(f"[DEBUG] XGBoost model saved to: {model_path}")
+            st.write(f"[DEBUG] Preprocessor saved to: {preprocessor_path}")
+            
+            # Verify the files were created
+            if os.path.exists(model_path):
+                st.success(f"✅ XGBoost model file verified: {model_path}")
+            else:
+                st.error(f"❌ XGBoost model file not found: {model_path}")
+                
+            # Test the model with different inputs
+            st.write("[DEBUG] Testing XGBoost with different towns...")
+            test_cases = [
+                {'town': 'ANG MO KIO', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
+                {'town': 'BEDOK', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
+                {'town': 'CENTRAL', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
+            ]
+            
+            st.write("[DEBUG] XGBoost Test Results:")
+            for i, test_case in enumerate(test_cases):
+                try:
+                    prediction = predictor.predict(test_case)
+                    st.write(f"  {test_case['town']}: S${prediction:.2f}")
+                except Exception as e:
+                    st.error(f"  {test_case['town']}: Error - {e}")
+            
+        elif model_type == "lstm":
+            # LSTM uses temporal data
+            X_train, X_test, y_train, y_test = processed_data['temporal']
+            st.write(f"[DEBUG] LSTM training data shape: {X_train.shape}")
+            st.write(f"[DEBUG] LSTM features: Categorical + temporal")
+            
+            model = trainer.train_lstm(processed_data)
+            
+            # Create predictor and save
+            predictor = RentalPredictor(
+                preprocessor=data_processor,
+                model=model,
+                model_type="lstm"
+            )
+            
+            # Save the model explicitly
+            st.write("[DEBUG] Saving LSTM model...")
+            model_path, preprocessor_path = predictor.save_model()
+            st.write(f"[DEBUG] LSTM model saved to: {model_path}")
+            
+            # Verify the files were created
+            if os.path.exists(model_path):
+                st.success(f"✅ LSTM model file verified: {model_path}")
+            else:
+                st.error(f"❌ LSTM model file not found: {model_path}")
+            
+        elif model_type == "arima":
+            # ARIMA uses temporal data
+            X_train, X_test, y_train, y_test = processed_data['temporal']
+            st.write(f"[DEBUG] ARIMA training data shape: {X_train.shape}")
+            st.write(f"[DEBUG] ARIMA features: Temporal focus")
+            
+            model = trainer.train_arima(processed_data)
+            
+            # Create predictor and save
+            predictor = RentalPredictor(
+                preprocessor=data_processor,
+                model=model,
+                model_type="arima"
+            )
+            
+            # Save the model explicitly
+            st.write("[DEBUG] Saving ARIMA model...")
+            model_path, preprocessor_path = predictor.save_model()
+            st.write(f"[DEBUG] ARIMA model saved to: {model_path}")
+            
+            # Verify the files were created
+            if os.path.exists(model_path):
+                st.success(f"✅ ARIMA model file verified: {model_path}")
+            else:
+                st.error(f"❌ ARIMA model file not found: {model_path}")
+            
+        else:
+            st.error("Unsupported model type")
+            return None
         
-        model = trainer.train_xgboost(processed_data, tune_hyperparams=tune_hyperparams)
+        # Check models directory
+        st.write("[DEBUG] Checking models directory...")
+        models_dir = "models"
+        if os.path.exists(models_dir):
+            files = os.listdir(models_dir)
+            st.write(f"[DEBUG] Files in models directory: {files}")
+            
+            # Show file sizes
+            for file in files:
+                file_path = os.path.join(models_dir, file)
+                if os.path.isfile(file_path):
+                    size = os.path.getsize(file_path)
+                    st.write(f"  {file}: {size} bytes")
+        else:
+            st.error(f"❌ Models directory not found: {models_dir}")
         
-        # Test the model with different inputs
-        st.write("[DEBUG] Testing XGBoost with different towns...")
+        return predictor
         
-        # Create test inputs
-        test_cases = [
-            {'town': 'ANG MO KIO', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
-            {'town': 'BEDOK', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
-            {'town': 'CENTRAL', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
-        ]
-        
-        # Create predictor for testing
-        predictor = RentalPredictor(
-            preprocessor=data_processor,
-            model=model,
-            model_type="xgboost"
-        )
-        
-        st.write("[DEBUG] XGBoost Test Results:")
-        for i, test_case in enumerate(test_cases):
-            try:
-                prediction = predictor.predict(test_case)
-                st.write(f"  {test_case['town']}: S${prediction:.2f}")
-            except Exception as e:
-                st.error(f"  {test_case['town']}: Error - {e}")
-        
-    elif model_type == "lstm":
-        # LSTM uses temporal data
-        X_train, X_test, y_train, y_test = processed_data['temporal']
-        st.write(f"[DEBUG] LSTM training data shape: {X_train.shape}")
-        st.write(f"[DEBUG] LSTM features: Categorical + temporal")
-        
-        model = trainer.train_lstm(processed_data)
-        
-    elif model_type == "arima":
-        # ARIMA uses temporal data
-        X_train, X_test, y_train, y_test = processed_data['temporal']
-        st.write(f"[DEBUG] ARIMA training data shape: {X_train.shape}")
-        st.write(f"[DEBUG] ARIMA features: Temporal focus")
-        
-        model = trainer.train_arima(processed_data)
-        
-    else:
-        st.error("Unsupported model type")
+    except Exception as e:
+        st.error(f"Error during {model_type} training: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
         return None
-    
-    best_model, best_model_name = trainer.get_best_model()
-    
-    # Create predictor with appropriate model type
-    predictor = RentalPredictor(
-        preprocessor=data_processor,
-        model=best_model,
-        model_type=best_model_name
-    )
-    
-    # Save model
-    model_path, preprocessor_path = predictor.save_model()
-    
-    return predictor
 
 # Function to make prediction with multiple models
 def predict_rent_multi(input_features):
@@ -157,7 +210,7 @@ if page == "Predict":
     else:
         # Input form
         with st.form("prediction_form"):
-                        # Get available towns and flat types from the data
+            # Get available towns and flat types from the data
             data_path = "data/RentingOutofFlats2025.csv"
             if os.path.exists(data_path):
                 data = load_data(data_path)
@@ -365,243 +418,211 @@ elif page == "Train Model":
     with tab2:
         st.subheader("Load Existing Models")
         
-        # MLflow or file-based model loading
-        load_option = st.radio("Load models from:", ["MLflow", "Local File"])
+        # Get available models
+        trainer = ModelTrainer()
+        available_models = trainer.get_available_models()
         
-        if load_option == "MLflow":
-            # Get available runs from MLflow
-            try:
-                experiment_name = "rental_prediction"
-                experiment = mlflow.get_experiment_by_name(experiment_name)
-                
-                if experiment:
-                    runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id])
-                    
-                    if len(runs) > 0:
-                        run_ids = runs['run_id'].tolist()
-                        run_names = [f"Run {i+1}: {runs.iloc[i]['tags.mlflow.runName']} ({runs.iloc[i]['run_id']})" 
-                                   for i in range(len(runs))]
-                        
-                        # Allow selecting multiple runs
-                        selected_runs = st.multiselect("Select MLflow Runs", run_names)
-                        
-                        if selected_runs and st.button("Load Selected Models"):
-                            # Initialize data processor
-                            data_processor = DataProcessor()
-                            
-                            # Process training data if available
-                            if os.path.exists(data_path):
-                                data = load_data(data_path)
-                                data_processor.preprocess_data(data)
-                                st.session_state.data_processor = data_processor
-                            
-                            # Load each selected model
-                            for selected_run in selected_runs:
-                                selected_run_id = run_ids[run_names.index(selected_run)]
-                                
-                                # Determine model type from run name
-                                run_name = runs[runs['run_id'] == selected_run_id]['tags.mlflow.runName'].iloc[0]
-                                
-                                if "XGBoost" in run_name:
-                                    model_type = "xgboost"
-                                elif "LSTM" in run_name:
-                                    model_type = "lstm"
-                                elif "ARIMA" in run_name:
-                                    model_type = "arima"
-                                else:
-                                    # Let user select model type
-                                    model_type = st.selectbox(
-                                        f"Model Type for {run_name}", 
-                                        ["xgboost", "lstm", "arima"]
-                                    )
-                                
-                                with st.spinner(f"Loading {model_type.upper()} model from MLflow..."):
-                                    predictor = RentalPredictor()
-                                    success = predictor.load_from_mlflow(selected_run_id, model_type)
-                                    
-                                    if success:
-                                        predictor.preprocessor = data_processor
-                                        st.session_state.predictors[model_type] = predictor
-                                        st.session_state.model_loaded = True
-                                        
-                                        st.success(f"{model_type.upper()} model loaded successfully!")
-                            
-                            if st.session_state.model_loaded:
-                                st.success("All selected models loaded! Go to the 'Predict' page to make predictions.")
-                    else:
-                        st.warning("No MLflow runs found. Train models first.")
-                else:
-                    st.warning(f"Experiment '{experiment_name}' not found in MLflow.")
-            except Exception as e:
-                st.error(f"Error accessing MLflow: {e}")
-                st.info("Make sure MLflow server is running and accessible.")
-        
-        else:  # Local File
-            model_dir = "models"
+        if available_models:
+            st.write("Available Models:")
             
-            if os.path.exists(model_dir):
-                # List available models
-                model_files = [f for f in os.listdir(model_dir) 
-                             if os.path.isfile(os.path.join(model_dir, f)) and not f.endswith('.pkl')]
+            # Display available models
+            for model in available_models:
+                with st.expander(f"{model['type'].upper()} Model"):
+                    info = model['info']
+                    st.write(f"**Type:** {info.get('model_type', 'Unknown')}")
+                    if 'metrics' in info:
+                        metrics = info['metrics']
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("RMSE", f"{metrics.get('rmse', 0):.2f}")
+                            st.metric("MAE", f"{metrics.get('mae', 0):.2f}")
+                        with col2:
+                            st.metric("MAPE", f"{metrics.get('mape', 0):.2f}%")
+                            st.metric("R²", f"{metrics.get('r2', 0):.2f}")
+                    if 'created_at' in info:
+                        st.write(f"**Created:** {info['created_at']}")
+            
+            # Select models to load
+            models_to_load = st.multiselect(
+                "Select Models to Load",
+                [m['type'] for m in available_models]
+            )
+            
+            if models_to_load and st.button("Load Selected Models"):
+                # Check if preprocessor exists
+                preprocessor_path = os.path.join("models", "data_processor.pkl")
                 
-                if len(model_files) > 0:
-                    # Allow selecting multiple model files
-                    selected_models = st.multiselect("Select Model Files", model_files)
+                if os.path.exists(preprocessor_path):
+                    # Load preprocessor
+                    data_processor = DataProcessor()
+                    predictor = RentalPredictor()
+                    success = predictor.load_preprocessor(preprocessor_path)
                     
-                    if selected_models and st.button("Load Selected Models"):
-                        # Check for preprocessor
-                        preprocessor_path = os.path.join(model_dir, "preprocessor.pkl")
+                    if success:
+                        st.session_state.data_processor = predictor.preprocessor
                         
-                        if os.path.exists(preprocessor_path):
-                            # Load each selected model
-                            for selected_model in selected_models:
-                                model_path = os.path.join(model_dir, selected_model)
+                        # Load each selected model
+                        for model_type in models_to_load:
+                            with st.spinner(f"Loading {model_type.upper()} model..."):
+                                new_predictor = RentalPredictor(
+                                    preprocessor=predictor.preprocessor
+                                )
                                 
-                                # Determine model type from filename
-                                if "xgboost" in selected_model.lower():
-                                    model_type = "xgboost"
-                                elif "lstm" in selected_model.lower():
-                                    model_type = "lstm"
-                                elif "arima" in selected_model.lower():
-                                    model_type = "arima"
+                                success = new_predictor.load_from_file(model_type)
+                                
+                                if success:
+                                    st.session_state.predictors[model_type] = new_predictor
+                                    st.session_state.model_loaded = True
+                                    st.success(f"{model_type.upper()} model loaded successfully!")
                                 else:
-                                    # Let user select model type
-                                    model_type = st.selectbox(
-                                        f"Model Type for {selected_model}", 
-                                        ["xgboost", "lstm", "arima"]
-                                    )
-                                
-                                with st.spinner(f"Loading {model_type.upper()} model from file..."):
-                                    predictor = RentalPredictor()
-                                    success = predictor.load_from_file(model_path, model_type)
-                                    
-                                    if success:
-                                        # Load preprocessor
-                                        preprocessor_success = predictor.load_preprocessor(preprocessor_path)
-                                        
-                                        if preprocessor_success:
-                                            st.session_state.predictors[model_type] = predictor
-                                            st.session_state.model_loaded = True
-                                            
-                                            st.success(f"{model_type.upper()} model loaded successfully!")
-                                        else:
-                                            st.error("Failed to load preprocessor.")
-                                    else:
-                                        st.error(f"Failed to load {model_type.upper()} model from file.")
-                            
-                            if st.session_state.model_loaded:
-                                st.success("All selected models loaded! Go to the 'Predict' page to make predictions.")
-                        else:
-                            st.warning("Preprocessor not found. You need both the model and preprocessor to make predictions.")
+                                    st.error(f"Failed to load {model_type.upper()} model.")
+                        
+                        if st.session_state.model_loaded:
+                            st.success("All selected models loaded! Go to the 'Predict' page to make predictions.")
+                    else:
+                        st.error("Failed to load preprocessor.")
                 else:
-                    st.warning("No model files found in the models directory. Train models first.")
-            else:
-                st.warning("Models directory not found. Train models first.")
+                    st.error("Preprocessor not found. Please train models first to create a preprocessor.")
+        else:
+            st.warning("No trained models found. Please train models first.")
 
 # Model Performance Page
 elif page == "Model Performance":
     st.header("Model Performance Metrics")
     
-    if not st.session_state.model_trained and not st.session_state.model_loaded:
-        st.warning("No models have been trained or loaded yet. Please go to the 'Train Model' page first.")
-    else:
-        # Check if MLflow is available
-        try:
-            experiment_name = "rental_prediction"
-            experiment = mlflow.get_experiment_by_name(experiment_name)
+    # Check for metrics log
+    metrics_file = os.path.join("models", "metrics_log.json")
+    
+    if os.path.exists(metrics_file):
+        with open(metrics_file, 'r') as f:
+            metrics_log = json.load(f)
+        
+        if metrics_log:
+            st.subheader("Model Performance History")
             
-            if experiment:
-                runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id])
+            # Convert to DataFrame for easier manipulation
+            df_metrics = pd.DataFrame(metrics_log)
+            
+            # Add simplified timestamp
+            df_metrics['timestamp'] = pd.to_datetime(df_metrics['timestamp'])
+            df_metrics['date'] = df_metrics['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
+            
+            # Display metrics table
+            st.dataframe(
+                df_metrics[['model_type', 'date', 'metrics']].to_dict('records'),
+                use_container_width=True
+            )
+            
+            # Plot metrics comparison
+            st.subheader("Metrics Comparison")
+            
+            # Extract metrics for plotting
+            plot_data = []
+            for entry in metrics_log:
+                metrics = entry['metrics']
+                plot_data.append({
+                    'Model': entry['model_type'].upper(),
+                    'RMSE': metrics.get('rmse', 0),
+                    'MAE': metrics.get('mae', 0),
+                    'MAPE': metrics.get('mape', 0),
+                    'R²': metrics.get('r2', 0)
+                })
+            
+            plot_df = pd.DataFrame(plot_data)
+            
+            # Use tabs for different metric visualizations
+            metric_tabs = st.tabs(["RMSE", "MAE", "MAPE", "R²"])
+            
+            with metric_tabs[0]:  # RMSE
+                fig_rmse = px.bar(
+                    plot_df, 
+                    x='Model', 
+                    y='RMSE',
+                    title='Root Mean Squared Error (RMSE) Comparison',
+                    color='Model'
+                )
+                st.plotly_chart(fig_rmse)
+            
+            with metric_tabs[1]:  # MAE
+                fig_mae = px.bar(
+                    plot_df, 
+                    x='Model', 
+                    y='MAE',
+                    title='Mean Absolute Error (MAE) Comparison',
+                    color='Model'
+                )
+                st.plotly_chart(fig_mae)
+            
+            with metric_tabs[2]:  # MAPE
+                fig_mape = px.bar(
+                    plot_df, 
+                    x='Model', 
+                    y='MAPE',
+                    title='Mean Absolute Percentage Error (MAPE) Comparison',
+                    color='Model'
+                )
+                st.plotly_chart(fig_mape)
+            
+            with metric_tabs[3]:  # R²
+                fig_r2 = px.bar(
+                    plot_df, 
+                    x='Model', 
+                    y='R²',
+                    title='R-squared (R²) Comparison',
+                    color='Model'
+                )
+                st.plotly_chart(fig_r2)
+            
+            # Model details
+            st.subheader("Model Details")
+            
+            # Select model for details
+            selected_model = st.selectbox(
+                "Select Model for Details",
+                plot_df['Model'].tolist()
+            )
+            
+            # Find the selected model's entry
+            selected_entry = next(
+                (entry for entry in metrics_log if entry['model_type'].upper() == selected_model),
+                None
+            )
+            
+            if selected_entry:
+                col1, col2 = st.columns(2)
                 
-                if len(runs) > 0:
-                    # Display runs and metrics
-                    st.subheader("MLflow Runs and Metrics")
-                    
-                    # Include MAPE in the metrics display
-                    metrics_df = runs[['tags.mlflow.runName', 'metrics.rmse', 'metrics.mae', 'metrics.mape', 'metrics.r2', 'tags.mlflow.source.name']]
-                    metrics_df.columns = ['Model', 'RMSE', 'MAE', 'MAPE (%)', 'R²', 'Source']
-                    
-                    st.dataframe(metrics_df)
-                    
-                    # Plot metrics comparison
-                    st.subheader("Metrics Comparison")
-                    
-                    # Use tabs for different metric visualizations
-                    metric_tabs = st.tabs(["RMSE", "MAE", "MAPE"])
-                    
-                    with metric_tabs[0]:  # RMSE
-                        fig_rmse = px.bar(
-                            metrics_df, 
-                            x='Model', 
-                            y='RMSE',
-                            title='Root Mean Squared Error (RMSE) Comparison',
-                            color='Model'
-                        )
-                        st.plotly_chart(fig_rmse)
-                    
-                    with metric_tabs[1]:  # MAE
-                        fig_mae = px.bar(
-                            metrics_df, 
-                            x='Model', 
-                            y='MAE',
-                            title='Mean Absolute Error (MAE) Comparison',
-                            color='Model'
-                        )
-                        st.plotly_chart(fig_mae)
-                    
-                    with metric_tabs[2]:  # MAPE
-                        fig_mape = px.bar(
-                            metrics_df, 
-                            x='Model', 
-                            y='MAPE (%)',
-                            title='Mean Absolute Percentage Error (MAPE) Comparison',
-                            color='Model'
-                        )
-                        st.plotly_chart(fig_mape)
-                    
-                    # Select run for detailed view
-                    selected_run_name = st.selectbox("Select Run for Details", metrics_df['Model'].tolist())
-                    selected_run = runs[runs['tags.mlflow.runName'] == selected_run_name].iloc[0]
-                    
-                    st.subheader(f"Details for {selected_run_name}")
-                    
-                    # Display parameters
+                with col1:
                     st.markdown("### Parameters")
-                    params = {k: v for k, v in selected_run.items() if k.startswith('params.')}
-                    params = {k.replace('params.', ''): v for k, v in params.items()}
-                    
+                    params = selected_entry.get('params', {})
                     for param, value in params.items():
                         st.text(f"{param}: {value}")
-                    
-                    # Display artifacts if available
-                    st.markdown("### Artifacts")
-                    
-                    run_id = selected_run['run_id']
-                    client = mlflow.tracking.MlflowClient()
-                    artifacts = client.list_artifacts(run_id)
-                    
-                    for artifact in artifacts:
-                        if artifact.path.endswith('.png'):
-                            # Download and display image
-                            artifact_path = mlflow.artifacts.download_artifacts(
-                                run_id=run_id,
-                                artifact_path=artifact.path
-                            )
-                            st.image(artifact_path, caption=artifact.path)
-                else:
-                    st.warning("No MLflow runs found. Train models first.")
-            else:
-                st.warning(f"Experiment '{experiment_name}' not found in MLflow.")
-        except Exception as e:
-            st.error(f"Error accessing MLflow: {e}")
-            st.info("Make sure MLflow server is running and accessible.")
-            
-            # Display alternative performance metrics if available
-            st.subheader("Current Model Performance")
-            
-            if st.session_state.predictors:
-                # TODO: Add code to display current model metrics
-                st.info("Performance metrics from MLflow are not available.")
+                
+                with col2:
+                    st.markdown("### Metrics")
+                    metrics = selected_entry['metrics']
+                    st.metric("RMSE", f"{metrics.get('rmse', 0):.2f}")
+                    st.metric("MAE", f"{metrics.get('mae', 0):.2f}")
+                    st.metric("MAPE", f"{metrics.get('mape', 0):.2f}%")
+                    st.metric("R²", f"{metrics.get('r2', 0):.2f}")
+                
+                # Display model artifacts if available
+                st.markdown("### Model Artifacts")
+                model_type = selected_entry['model_type']
+                
+                # Check for visualizations
+                artifacts = {
+                    'Feature Importance': f"models/{model_type}_feature_importance.png",
+                    'Training History': f"models/{model_type}_training_history.png",
+                    'Predictions': f"models/{model_type}_predictions.png"
+                }
+                
+                for artifact_name, artifact_path in artifacts.items():
+                    if os.path.exists(artifact_path):
+                        st.image(artifact_path, caption=artifact_name)
+        else:
+            st.warning("No metrics history found.")
+    else:
+        st.warning("No metrics log found. Train models to see performance metrics.")
 
 # Footer
 st.sidebar.markdown("---")
