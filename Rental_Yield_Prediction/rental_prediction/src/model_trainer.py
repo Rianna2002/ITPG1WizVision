@@ -11,7 +11,7 @@ import joblib
 import scipy.sparse
 from statsmodels.tsa.arima.model import ARIMA
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, LSTM, BatchNormalization, InputLayer
+from tensorflow.keras.layers import Dense, Dropout, LSTM, BatchNormalization, InputLayer, Bidirectional
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 
@@ -210,11 +210,35 @@ class ModelTrainer:
     
     def train_lstm(self, processed_data, params=None):
         """
-        Train LSTM using temporal features
+        Train LSTM using temporal features with GPU acceleration
         
         Args:
             processed_data: Dictionary containing 'xgboost' and 'temporal' data
         """
+        import tensorflow as tf
+        
+        # Check for GPU availability
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            print(f"Training on GPU: {len(gpus)} GPU(s) available")
+            # Memory growth needs to be set before GPUs have been initialized
+            for gpu in gpus:
+                try:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                    print(f"Memory growth enabled for {gpu}")
+                except RuntimeError as e:
+                    print(f"Memory growth setting failed: {e}")
+        else:
+            print("No GPU found. Training on CPU instead.")
+        
+        # Enable mixed precision (if supported by GPU)
+        try:
+            policy = tf.keras.mixed_precision.Policy('mixed_float16')
+            tf.keras.mixed_precision.set_global_policy(policy)
+            print("Mixed precision training enabled")
+        except Exception as e:
+            print(f"Could not enable mixed precision: {e}")
+        
         # Use temporal data (with temporal features)
         X_train, X_test, y_train, y_test = processed_data['temporal']
         
@@ -222,12 +246,12 @@ class ModelTrainer:
         
         if params is None:
             params = {
-                'lstm_units': 64,
-                'dense_units': 32,
-                'dropout_rate': 0.2,
+                'lstm_units': 512,
+                'dense_units': 256,
+                'dropout_rate': 0.3,
                 'learning_rate': 0.001,
-                'batch_size': 32,
-                'epochs': 20
+                'batch_size': 512,
+                'epochs': 30
             }
         
         print(f"Feature count: {X_train.shape[1]} (temporal features included)")
@@ -254,18 +278,31 @@ class ModelTrainer:
         # Build LSTM model
         model = Sequential()
         
-        # Input layer
-        model.add(LSTM(
-            units=params['lstm_units'],
-            input_shape=(1, X_train.shape[1]),
-            return_sequences=False,
-            activation='relu',
-            kernel_initializer='he_normal'
+        # Input layer - Bidirectional LSTM
+        model.add(Bidirectional(
+            LSTM(
+                units=params['lstm_units'] // 2,  # Halve the units since Bidirectional doubles the output
+                input_shape=(1, X_train.shape[1]),
+                return_sequences=True,
+                activation='relu',
+                kernel_initializer='he_normal'
+            )
         ))
         model.add(BatchNormalization())
         model.add(Dropout(params['dropout_rate']))
         
-        # Dense hidden layer
+        # Second LSTM layer - also Bidirectional
+        model.add(Bidirectional(
+            LSTM(
+                units=params['lstm_units'] // 4,  # Halve units again for the second layer
+                return_sequences=False,
+                activation='relu'
+            )
+        ))
+        model.add(BatchNormalization())
+        model.add(Dropout(params['dropout_rate']))
+        
+        # Dense hidden layers
         model.add(Dense(
             units=params['dense_units'],
             activation='relu',

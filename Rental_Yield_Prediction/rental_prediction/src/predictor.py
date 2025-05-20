@@ -106,6 +106,9 @@ class RentalPredictor:
         print(f"[DEBUG] Making prediction with {self.model_type}")
         print(f"[DEBUG] Input data: {input_data}")
         
+        # Check for explicit temporal features
+        has_temporal = 'year' in input_data and 'month' in input_data
+        
         # Determine which preprocessor to use based on model type
         preprocess_model_type = 'xgboost' if self.model_type == 'xgboost' else 'temporal'
         
@@ -128,14 +131,6 @@ class RentalPredictor:
             prediction_array = self.model.predict(processed_input)
             prediction = prediction_array[0]
             
-            # Test different inputs to verify model is working
-            print(f"[DEBUG] XGBoost prediction: {prediction}")
-            
-            # Test with zeros to see different prediction
-            test_zeros = np.zeros_like(processed_input)
-            test_pred_zeros = self.model.predict(test_zeros)
-            print(f"[DEBUG] XGBoost with zeros: {test_pred_zeros[0]}")
-            
         elif self.model_type == "lstm":
             print(f"[DEBUG] Using LSTM (with temporal features)")
             # Ensure model is loaded correctly
@@ -147,8 +142,11 @@ class RentalPredictor:
             print(f"[DEBUG] LSTM input shape: {lstm_input.shape}")
             
             prediction = self.model.predict(lstm_input, verbose=0)[0][0]
-            print(f"[DEBUG] LSTM prediction: {prediction}")
             
+            # If temporal features were provided, log them
+            if has_temporal:
+                print(f"[DEBUG] LSTM prediction for {input_data['year']}-{input_data['month']:02d}: {prediction}")
+        
         elif self.model_type == "arima":
             print(f"[DEBUG] Using ARIMA (with temporal features)")
             try:
@@ -163,12 +161,30 @@ class RentalPredictor:
                     # Fallback to simple baseline
                     prediction = 2500.0
                     print("[WARNING] Using fallback prediction for ARIMA")
+                
+                # For ARIMA with temporal features, we could add seasonal adjustments
+                if has_temporal:
+                    # Apply a simple seasonal adjustment based on month
+                    # This is a placeholder - you might want to implement a more sophisticated approach
+                    month_factor = {
+                        1: 1.02,  # January: +2%
+                        2: 1.03,  # February: +3%
+                        3: 1.02,  # March: +2%
+                        4: 1.00,  # April: no change
+                        5: 0.98,  # May: -2%
+                        6: 0.97,  # June: -3%
+                        7: 0.99,  # July: -1%
+                        8: 1.00,  # August: no change
+                        9: 1.01,  # September: +1%
+                        10: 1.02, # October: +2%
+                        11: 1.03, # November: +3%
+                        12: 1.04, # December: +4%
+                    }
                     
-                # Ensure valid prediction
-                if prediction <= 0 or np.isnan(prediction):
-                    prediction = 2500.0
-                    print("[WARNING] ARIMA prediction was invalid, using fallback")
-                    
+                    year_factor = 1.03 ** (input_data['year'] - 2024)  # 3% annual increase from baseline
+                    prediction = prediction * month_factor.get(input_data['month'], 1.0) * year_factor
+                    print(f"[DEBUG] ARIMA adjusted prediction for {input_data['year']}-{input_data['month']:02d}: {prediction}")
+                
             except Exception as e:
                 print(f"[ERROR] ARIMA prediction failed: {e}")
                 prediction = 2500.0

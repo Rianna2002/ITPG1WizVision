@@ -201,6 +201,60 @@ def predict_rent_multi(input_features):
     return predictions
 
 # Prediction Page
+def predict_rent_time_series(input_features, months_range=12):
+    """
+    Make predictions for a range of months before and after the current date
+    
+    Args:
+        input_features: Dictionary of property features
+        months_range: Number of months before and after (default 12)
+    
+    Returns:
+        Dictionary with predictions for each month/year combination
+    """
+    # Get current date as reference point
+    from datetime import datetime, timedelta
+    current_date = datetime.now()
+    
+    # Generate list of dates for prediction
+    dates = []
+    for i in range(-months_range, months_range + 1):
+        # Calculate target date
+        target_date = current_date + timedelta(days=i*30)  # Approximate month
+        dates.append({
+            'year': target_date.year,
+            'month': target_date.month,
+            'label': target_date.strftime('%Y-%m')
+        })
+    
+    # Initialize results
+    time_series_results = {
+        'dates': [d['label'] for d in dates],
+        'predictions': {}
+    }
+    
+    # Make predictions for each model type
+    for model_type, predictor in st.session_state.predictors.items():
+        if predictor and model_type in ['lstm', 'arima']:  # Only use temporal models
+            predictions = []
+            
+            for date in dates:
+                # Copy input features and add temporal information
+                date_input = input_features.copy()
+                date_input['year'] = date['year']
+                date_input['month'] = date['month']
+                
+                try:
+                    prediction = predictor.predict(date_input)
+                    predictions.append(prediction)
+                except Exception as e:
+                    st.error(f"Error with {model_type} prediction for {date['label']}: {e}")
+                    predictions.append(None)
+            
+            time_series_results['predictions'][model_type] = predictions
+    
+    return time_series_results
+
 if page == "Predict":
     st.header("Predict Monthly Rent")
     
@@ -251,81 +305,288 @@ if page == "Predict":
                 # Make predictions using all available models
                 predictions = predict_rent_multi(input_features)
                 
-                if predictions:
-                    # Display results
-                    st.subheader("Predicted Monthly Rent from All Models")
+                # if predictions:
+                #     # Display results
+                #     st.subheader("Predicted Monthly Rent from All Models")
                     
-                    # Create columns for each model prediction
-                    model_cols = st.columns(len(predictions))
+                #     # Create columns for each model prediction
+                #     model_cols = st.columns(len(predictions))
+                    
+                #     # Define model colors for consistency
+                #     model_colors = {
+                #         "xgboost": "#1f77b4",  # Blue
+                #         "lstm": "#2ca02c",     # Green
+                #         "arima": "#d62728"     # Red
+                #     }
+                    
+                #     # Display predictions
+                #     for i, (model_type, prediction) in enumerate(predictions.items()):
+                #         if prediction is not None:
+                #             with model_cols[i]:
+                #                 st.metric(
+                #                     f"{model_type.upper()} Prediction", 
+                #                     f"S${prediction:.2f}",
+                #                     delta=None
+                #                 )
+                    
+                #     # Create a bar chart comparing model predictions
+                #     fig = go.Figure()
+                    
+                #     for model_type, prediction in predictions.items():
+                #         if prediction is not None:
+                #             fig.add_trace(go.Bar(
+                #                 x=[model_type.upper()],
+                #                 y=[prediction],
+                #                 name=model_type.upper(),
+                #                 marker_color=model_colors.get(model_type.lower(), "gray")
+                #             ))
+                    
+                #     fig.update_layout(
+                #         title="Model Predictions Comparison",
+                #         xaxis_title="Model",
+                #         yaxis_title="Predicted Rent (S$)",
+                #         height=400
+                #     )
+                    
+                #     st.plotly_chart(fig)
+                    
+                #     # Additional analysis
+                #     st.subheader("Rental Analysis")
+                    
+                #     # Calculate average prediction across models
+                #     valid_predictions = [p for p in predictions.values() if p is not None]
+                #     if valid_predictions:
+                #         avg_prediction = sum(valid_predictions) / len(valid_predictions)
+                        
+                #         # Calculate annual rent based on average prediction
+                #         annual_rent = avg_prediction * 12
+                        
+                #         col1, col2 = st.columns(2)
+                        
+                #         with col1:
+                #             st.metric("Average Monthly Rent (All Models)", f"S${avg_prediction:.2f}")
+                #             st.metric("Annual Rent (Based on Average)", f"S${annual_rent:.2f}")
+                        
+                #         with col2:
+                #             # Compare with average rent for that town and flat type
+                #             if os.path.exists(data_path):
+                #                 avg_rent = data[(data['town'] == town) & (data['flat_type'] == flat_type)]['monthly_rent'].mean()
+                #                 diff = avg_prediction - avg_rent
+                #                 st.metric(f"Average Rent for {flat_type} in {town}", f"S${avg_rent:.2f}", f"{diff:+.2f}")
+                                
+                #                 # Comparison with similar properties
+                #                 st.markdown("### Similar Properties")
+                #                 similar = data[(data['town'] == town) & (data['flat_type'] == flat_type)].head(5)
+                #                 st.dataframe(similar[['block', 'street_name', 'monthly_rent']])
+                # else:
+                #     st.error("No predictions available. Please ensure at least one model is trained or loaded.")
+
+                # Generate time series prediction automatically (removed checkbox)
+                st.subheader("Rental Price Forecast (±12 Months)")
+                
+                # Make time series predictions
+                with st.spinner("Generating time series forecast..."):
+                    time_series_data = predict_rent_time_series(input_features)
+                
+                if time_series_data['predictions']:
+                    # Create line chart for time series predictions
+                    fig = go.Figure()
                     
                     # Define model colors for consistency
                     model_colors = {
-                        "xgboost": "#1f77b4",  # Blue
                         "lstm": "#2ca02c",     # Green
                         "arima": "#d62728"     # Red
                     }
                     
-                    # Display predictions
-                    for i, (model_type, prediction) in enumerate(predictions.items()):
-                        if prediction is not None:
-                            with model_cols[i]:
-                                st.metric(
-                                    f"{model_type.upper()} Prediction", 
-                                    f"S${prediction:.2f}",
-                                    delta=None
-                                )
+                    reference_point = len(time_series_data['dates']) // 2
                     
-                    # Create a bar chart comparing model predictions
-                    fig = go.Figure()
+                    # Display current month's prediction prominently
+                    st.subheader("Current Month Predicted Rent")
+                    current_predictions = {}
+                    prediction_cols = st.columns(len(time_series_data['predictions']))
                     
-                    for model_type, prediction in predictions.items():
-                        if prediction is not None:
-                            fig.add_trace(go.Bar(
-                                x=[model_type.upper()],
-                                y=[prediction],
-                                name=model_type.upper(),
-                                marker_color=model_colors.get(model_type.lower(), "gray")
+                    for i, (model_type, model_predictions) in enumerate(time_series_data['predictions'].items()):
+                        if any(p is not None for p in model_predictions):
+                            current_value = model_predictions[reference_point]
+                            if current_value is not None:
+                                current_predictions[model_type] = current_value
+                                with prediction_cols[i]:
+                                    st.metric(
+                                        f"{model_type.upper()} Prediction", 
+                                        f"S${current_value:.2f}"
+                                    )
+                    
+                    # Calculate and display average if multiple models are available
+                    if len(current_predictions) > 1:
+                        avg_current = sum(current_predictions.values()) / len(current_predictions)
+                        st.metric("Average Prediction", f"S${avg_current:.2f}")
+                    
+                    # Create a DataFrame for tabular display
+                    table_data = {"Date": time_series_data['dates']}
+                    
+                    # Calculate min/max values for y-axis range
+                    all_values = []
+                    
+                    for model_type, model_predictions in time_series_data['predictions'].items():
+                        if any(p is not None for p in model_predictions):
+                            # Add to plot
+                            fig.add_trace(go.Scatter(
+                                x=time_series_data['dates'],
+                                y=model_predictions,
+                                mode='lines+markers',
+                                name=f"{model_type.upper()} Forecast",
+                                line=dict(color=model_colors.get(model_type.lower(), "gray"), width=2),
+                                hoverinfo='text',
+                                hovertext=[f"{date}: S${pred:.2f}" for date, pred in 
+                                          zip(time_series_data['dates'], model_predictions)]
                             ))
+                            
+                            # Add to table data
+                            table_data[f"{model_type.upper()}"] = [f"S${pred:.2f}" if pred is not None else "N/A" 
+                                                                  for pred in model_predictions]
+                            
+                            # Add to values list for y-axis range calculation
+                            all_values.extend([v for v in model_predictions if v is not None])
                     
-                    fig.update_layout(
-                        title="Model Predictions Comparison",
-                        xaxis_title="Model",
-                        yaxis_title="Predicted Rent (S$)",
-                        height=400
+                    # Add a vertical line for current date
+                    fig.add_shape(
+                        type="line",
+                        x0=time_series_data['dates'][reference_point],
+                        y0=min(all_values) * 0.95 if all_values else 0,
+                        x1=time_series_data['dates'][reference_point],
+                        y1=max(all_values) * 1.05 if all_values else 0,
+                        line=dict(color="black", width=1, dash="dash"),
                     )
                     
-                    st.plotly_chart(fig)
+                    # Add annotation for current date
+                    fig.add_annotation(
+                        x=time_series_data['dates'][reference_point],
+                        y=min(all_values) * 0.95 if all_values else 0,
+                        text="Current Month",
+                        showarrow=True,
+                        arrowhead=1,
+                        ax=0,
+                        ay=25
+                    )
                     
-                    # Additional analysis
-                    st.subheader("Rental Analysis")
+                    # Set y-axis range to not start from zero
+                    y_min = min(all_values) * 0.95 if all_values else 0
+                    y_max = max(all_values) * 1.05 if all_values else 0
                     
-                    # Calculate average prediction across models
-                    valid_predictions = [p for p in predictions.values() if p is not None]
-                    if valid_predictions:
-                        avg_prediction = sum(valid_predictions) / len(valid_predictions)
+                    fig.update_layout(
+                        title="Rental Price Forecast Over Time",
+                        xaxis_title="Date",
+                        yaxis_title="Predicted Rent (S$)",
+                        legend_title="Model",
+                        hovermode="closest",
+                        height=500,
+                        yaxis=dict(range=[y_min, y_max])
+                    )
+                    
+                    # Add zone highlighting
+                    # Past zone (light gray)
+                    fig.add_shape(
+                        type="rect",
+                        xref="x",
+                        yref="y",
+                        x0=time_series_data['dates'][0],
+                        y0=y_min,
+                        x1=time_series_data['dates'][reference_point-1],
+                        y1=y_max,
+                        fillcolor="lightgray",
+                        opacity=0.2,
+                        layer="below",
+                        line_width=0,
+                    )
+
+                    # Current zone (light green)
+                    fig.add_shape(
+                        type="rect",
+                        xref="x",
+                        yref="y",
+                        x0=time_series_data['dates'][reference_point],
+                        y0=y_min,
+                        x1=time_series_data['dates'][reference_point],
+                        y1=y_max,
+                        fillcolor="rgb(0, 255, 0)",
+                        opacity=0.3,
+                        layer="below",
+                        line_width=0,
+                    )
+
+                    # Future zone (light blue)
+                    fig.add_shape(
+                        type="rect",
+                        xref="x",
+                        yref="y",
+                        x0=time_series_data['dates'][reference_point+1],
+                        y0=y_min,
+                        x1=time_series_data['dates'][-1],
+                        y1=y_max,
+                        fillcolor="lightblue",
+                        opacity=0.2,
+                        layer="below",
+                        line_width=0,
+                    )
+
+                    # Add annotations for zones
+                    fig.add_annotation(
+                        x=time_series_data['dates'][reference_point//2],
+                        y=y_max*0.95,
+                        text="Historical Data",
+                        showarrow=False,
+                        font=dict(size=12)
+                    )
+
+                    fig.add_annotation(
+                        x=time_series_data['dates'][reference_point],
+                        y=y_max*0.95,
+                        text="Current",
+                        showarrow=False,
+                        font=dict(size=12)
+                    )
+
+                    fig.add_annotation(
+                        x=time_series_data['dates'][reference_point + (len(time_series_data['dates'])-reference_point)//2],
+                        y=y_max*0.95,
+                        text="Forecast",
+                        showarrow=False,
+                        font=dict(size=12)
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display tabular data
+                    st.subheader("Monthly Forecast Values")
+                    forecast_df = pd.DataFrame(table_data)
+                    
+                    # Highlight current month row
+                    def highlight_current_month(row):
+                        if row.name == reference_point:
+                            return ['background-color: #0A0'] * len(row)
+                        return [''] * len(row)
+                    
+                    # Display the table with styling
+                    st.dataframe(
+                        forecast_df.style.apply(highlight_current_month, axis=1),
+                        use_container_width=True
+                    )
+                    
+                    # Add an explanation of the forecast
+                    with st.expander("About this forecast"):
+                        st.markdown("""
+                        This forecast shows predicted rental prices for the selected property over time (12 months 
+                        before and after the current date). Note that:
                         
-                        # Calculate annual rent based on average prediction
-                        annual_rent = avg_prediction * 12
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.metric("Average Monthly Rent (All Models)", f"S${avg_prediction:.2f}")
-                            st.metric("Annual Rent (Based on Average)", f"S${annual_rent:.2f}")
-                        
-                        with col2:
-                            # Compare with average rent for that town and flat type
-                            if os.path.exists(data_path):
-                                avg_rent = data[(data['town'] == town) & (data['flat_type'] == flat_type)]['monthly_rent'].mean()
-                                diff = avg_prediction - avg_rent
-                                st.metric(f"Average Rent for {flat_type} in {town}", f"S${avg_rent:.2f}", f"{diff:+.2f}")
-                                
-                                # Comparison with similar properties
-                                st.markdown("### Similar Properties")
-                                similar = data[(data['town'] == town) & (data['flat_type'] == flat_type)].head(5)
-                                st.dataframe(similar[['block', 'street_name', 'monthly_rent']])
+                        * Only temporal models (LSTM and ARIMA) are used for time series predictions
+                        * XGBoost is excluded because it doesn't utilize temporal features
+                        * The vertical dashed line represents the current month
+                        * Past predictions show what the rental price likely was historically
+                        * Future predictions show expected rental price trends
+                        * The current month is highlighted in the table
+                        """)
                 else:
-                    st.error("No predictions available. Please ensure at least one model is trained or loaded.")
+                    st.warning("Time series forecast requires temporal models (LSTM or ARIMA). Please train or load these models.")
 
 # Train Model Page
 elif page == "Train Model":
@@ -367,7 +628,7 @@ elif page == "Train Model":
             model_types = st.multiselect(
                 "Select Models to Train", 
                 ["xgboost", "lstm", "arima"],
-                default=["xgboost"],
+                default=["lstm"],
                 help="XGBoost uses categorical features only, LSTM and ARIMA use temporal features"
             )
             

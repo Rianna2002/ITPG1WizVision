@@ -181,10 +181,13 @@ class DataProcessor:
             input_df['month'] = input_df['rent_approval_date'].dt.month
             input_df['year'] = input_df['rent_approval_date'].dt.year
             input_df = input_df.drop('rent_approval_date', axis=1)
+        elif 'month' in input_df.columns and 'year' in input_df.columns:
+            # Month and year are already provided
+            print(f"[DEBUG] Using provided temporal features: {input_df['year'].iloc[0]}-{input_df['month'].iloc[0]}")
         else:
             # For XGBoost, we don't need temporal features
             if model_type == 'temporal':
-                # For temporal models, use a representative date
+                # For temporal models, use a representative date if not provided
                 input_df['year'] = 2024
                 input_df['month'] = 6
                 print(f"[INFO] Using default date for temporal model: 2024-06")
