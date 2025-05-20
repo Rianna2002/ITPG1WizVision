@@ -1,0 +1,22 @@
+[
+  {
+    "model_type": "lstm",
+    "timestamp": "2025-05-20T21:14:09.140842",
+    "params": {
+      "lstm_units": 512,
+      "dense_units": 256,
+      "dropout_rate": 0.3,
+      "learning_rate": 0.001,
+      "batch_size": 512,
+      "epochs": 30
+    },
+    "feature_count": 3384,
+    "metrics": {
+      "mse": 241695.02603887717,
+      "rmse": 491.62488346184955,
+      "mae": 361.7030024258845,
+      "mape": 14.92736225469492,
+      "r2": 0.5736798962827532
+    }
+  }
+]
