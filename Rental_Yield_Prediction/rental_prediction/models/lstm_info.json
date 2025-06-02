@@ -1,21 +1,20 @@
 {
-  "model_type": "lstm",
-  "params": {
-    "lstm_units": 512,
-    "dense_units": 256,
-    "dropout_rate": 0.3,
-    "learning_rate": 0.001,
-    "batch_size": 512,
-    "epochs": 30
-  },
   "metrics": {
-    "mse": 241695.02603887717,
-    "rmse": 491.62488346184955,
-    "mae": 361.7030024258845,
-    "mape": 14.92736225469492,
-    "r2": 0.5736798962827532
+    "rmse": 1082.7634570856185,
+    "mape": 38.39066696801159,
+    "r2": 0.57,
+    "picp": 0.708,
+    "mpiw": 2421.1950880528316,
+    "feature_importance": {
+      "town": 1.0,
+      "flat_type": 0.31768501069579724
+    }
   },
-  "model_path": "models\\lstm_model.keras",
-  "feature_count": 3384,
-  "created_at": "2025-05-20T21:14:09.274879"
+  "params": {
+    "units": 512,
+    "dropout": 0.3,
+    "epochs": 30,
+    "batch_size": 512
+  },
+  "timestamp": "2025-06-02 16:02:59"
 }

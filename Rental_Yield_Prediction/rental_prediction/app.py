@@ -5,8 +5,10 @@ import os
 import json
 import plotly.express as px
 import plotly.graph_objects as go
+import time
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
 from src.data_processor import DataProcessor
-from src.model_trainer import ModelTrainer
 from src.predictor import RentalPredictor
 
 # Set page configuration
@@ -16,32 +18,48 @@ st.set_page_config(
     layout="wide"
 )
 
-# Application title
-st.title("Singapore Property Rental Prediction")
-st.markdown("## Predict monthly rent based on property details")
+# Function to load a model with enhanced error handling
+def load_model():
+    """Load LSTM model from disk and return the predictor with improved error handling"""
+    model_type = "lstm"  # Always load LSTM
+    try:
+        st.info(f"Attempting to load {model_type.upper()} model...")
+        # Check if model file exists
+        model_file = os.path.join("models", f"{model_type}_model.keras")
+        if not os.path.exists(model_file):
+            st.error(f"Model file not found: {model_file}")
+            return None
 
-# Sidebar for navigation
-page = st.sidebar.selectbox("Select Page", ["Predict", "Train Model", "Model Performance"])
-
-# Add reset models button
-if st.sidebar.button("🔄 Reset Models", key="reset_models"):
-    # Clear all model-related session state
-    st.session_state.predictors = {}
-    st.session_state.model_trained = False
-    st.session_state.model_loaded = False
-    st.session_state.data_processor = None
-    st.success("Models reset! Please retrain or reload your models.")
-    st.experimental_rerun()
-
-# Initialize session state variables if they don't exist
-if 'predictors' not in st.session_state:
-    st.session_state.predictors = {}
-if 'model_trained' not in st.session_state:
-    st.session_state.model_trained = False
-if 'model_loaded' not in st.session_state:
-    st.session_state.model_loaded = False
-if 'data_processor' not in st.session_state:
-    st.session_state.data_processor = None
+        # Check if preprocessor exists
+        preprocessor_path = os.path.join("models", "data_processor.pkl")
+        if not os.path.exists(preprocessor_path):
+            st.error(f"Preprocessor not found: {preprocessor_path}")
+            return None
+            
+        # Create predictor
+        predictor = RentalPredictor()
+        
+        # Load preprocessor
+        st.info("Loading preprocessor...")
+        success_preprocessor = predictor.load_preprocessor(preprocessor_path)
+        if not success_preprocessor:
+            st.error(f"Failed to load preprocessor from {preprocessor_path}")
+            return None
+        
+        # Load model with explicit path
+        st.info(f"Loading model from {model_file}...")
+        success_model = predictor.load_from_file(model_type)
+        if not success_model:
+            st.error(f"Failed to load {model_type} model")
+            return None
+            
+        return predictor
+            
+    except Exception as e:
+        st.error(f"Error loading {model_type} model: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return None
 
 # Function to load data
 @st.cache_data
@@ -53,164 +71,53 @@ def load_data(file_path):
         st.error(f"Error loading data: {e}")
         return None
 
-# Function to train model without MLflow
-def train_model(data_processor, processed_data, model_type, tune_hyperparams=False):
-    """
-    Train model using the appropriate data for each model type
-    """
-    trainer = ModelTrainer()
+# Function to make prediction for multiple combinations
+def predict_rent_multiple(towns, flat_types):
+    """Make rental predictions for multiple town and flat_type combinations"""
+    results = []
     
-    st.write(f"[DEBUG] Training {model_type.upper()} model...")
+    if 'lstm' not in st.session_state.predictors:
+        return results
+        
+    predictor = st.session_state.predictors['lstm']
     
-    try:
-        if model_type == "xgboost":
-            # XGBoost uses non-temporal data
-            X_train, X_test, y_train, y_test = processed_data['xgboost']
-            st.write(f"[DEBUG] XGBoost training data shape: {X_train.shape}")
-            st.write(f"[DEBUG] XGBoost features: Categorical only (no temporal)")
-            
-            model = trainer.train_xgboost(processed_data, tune_hyperparams=tune_hyperparams)
-            
-            # Create predictor for testing
-            predictor = RentalPredictor(
-                preprocessor=data_processor,
-                model=model,
-                model_type="xgboost"
-            )
-            
-            # Save the model explicitly
-            st.write("[DEBUG] Saving XGBoost model...")
-            model_path, preprocessor_path = predictor.save_model()
-            st.write(f"[DEBUG] XGBoost model saved to: {model_path}")
-            st.write(f"[DEBUG] Preprocessor saved to: {preprocessor_path}")
-            
-            # Verify the files were created
-            if os.path.exists(model_path):
-                st.success(f"✅ XGBoost model file verified: {model_path}")
-            else:
-                st.error(f"❌ XGBoost model file not found: {model_path}")
-                
-            # Test the model with different inputs
-            st.write("[DEBUG] Testing XGBoost with different towns...")
-            test_cases = [
-                {'town': 'ANG MO KIO', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
-                {'town': 'BEDOK', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
-                {'town': 'CENTRAL', 'flat_type': '3 ROOM', 'block': '123', 'street_name': 'SAMPLE STREET'},
-            ]
-            
-            st.write("[DEBUG] XGBoost Test Results:")
-            for i, test_case in enumerate(test_cases):
-                try:
-                    prediction = predictor.predict(test_case)
-                    st.write(f"  {test_case['town']}: S${prediction:.2f}")
-                except Exception as e:
-                    st.error(f"  {test_case['town']}: Error - {e}")
-            
-        elif model_type == "lstm":
-            # LSTM uses temporal data
-            X_train, X_test, y_train, y_test = processed_data['temporal']
-            st.write(f"[DEBUG] LSTM training data shape: {X_train.shape}")
-            st.write(f"[DEBUG] LSTM features: Categorical + temporal")
-            
-            model = trainer.train_lstm(processed_data)
-            
-            # Create predictor and save
-            predictor = RentalPredictor(
-                preprocessor=data_processor,
-                model=model,
-                model_type="lstm"
-            )
-            
-            # Save the model explicitly
-            st.write("[DEBUG] Saving LSTM model...")
-            model_path, preprocessor_path = predictor.save_model()
-            st.write(f"[DEBUG] LSTM model saved to: {model_path}")
-            
-            # Verify the files were created
-            if os.path.exists(model_path):
-                st.success(f"✅ LSTM model file verified: {model_path}")
-            else:
-                st.error(f"❌ LSTM model file not found: {model_path}")
-            
-        elif model_type == "arima":
-            # ARIMA uses temporal data
-            X_train, X_test, y_train, y_test = processed_data['temporal']
-            st.write(f"[DEBUG] ARIMA training data shape: {X_train.shape}")
-            st.write(f"[DEBUG] ARIMA features: Temporal focus")
-            
-            model = trainer.train_arima(processed_data)
-            
-            # Create predictor and save
-            predictor = RentalPredictor(
-                preprocessor=data_processor,
-                model=model,
-                model_type="arima"
-            )
-            
-            # Save the model explicitly
-            st.write("[DEBUG] Saving ARIMA model...")
-            model_path, preprocessor_path = predictor.save_model()
-            st.write(f"[DEBUG] ARIMA model saved to: {model_path}")
-            
-            # Verify the files were created
-            if os.path.exists(model_path):
-                st.success(f"✅ ARIMA model file verified: {model_path}")
-            else:
-                st.error(f"❌ ARIMA model file not found: {model_path}")
-            
-        else:
-            st.error("Unsupported model type")
-            return None
-        
-        # Check models directory
-        st.write("[DEBUG] Checking models directory...")
-        models_dir = "models"
-        if os.path.exists(models_dir):
-            files = os.listdir(models_dir)
-            st.write(f"[DEBUG] Files in models directory: {files}")
-            
-            # Show file sizes
-            for file in files:
-                file_path = os.path.join(models_dir, file)
-                if os.path.isfile(file_path):
-                    size = os.path.getsize(file_path)
-                    st.write(f"  {file}: {size} bytes")
-        else:
-            st.error(f"❌ Models directory not found: {models_dir}")
-        
-        return predictor
-        
-    except Exception as e:
-        st.error(f"Error during {model_type} training: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
-        return None
-
-# Function to make prediction with multiple models
-def predict_rent_multi(input_features):
-    predictions = {}
+    # Use default values for block and street_name
+    block = "123"
+    street_name = "SAMPLE STREET"
     
-    for model_type, predictor in st.session_state.predictors.items():
-        if predictor:
+    # Make prediction for each combination
+    for town in towns:
+        for flat_type in flat_types:
             try:
-                predictions[model_type] = predictor.predict(input_features)
+                input_features = {
+                    'town': town,
+                    'block': block,
+                    'street_name': street_name,
+                    'flat_type': flat_type
+                }
+                prediction = predictor.predict(input_features)
+                results.append({
+                    'town': town,
+                    'flat_type': flat_type,
+                    'prediction': prediction
+                })
             except Exception as e:
-                st.error(f"Error with {model_type} prediction: {e}")
-                predictions[model_type] = None
+                st.error(f"Error predicting for {town}, {flat_type}: {e}")
     
-    return predictions
+    return results
 
 # Prediction Page
-def predict_rent_time_series(input_features, months_range=12):
+def predict_rent_time_series_multiple(towns, flat_types, months_range=12):
     """
-    Make predictions for a range of months before and after the current date
+    Make predictions for multiple town/flat_type combinations over time
     
     Args:
-        input_features: Dictionary of property features
+        towns: List of towns to predict for
+        flat_types: List of flat types to predict for
         months_range: Number of months before and after (default 12)
     
     Returns:
-        Dictionary with predictions for each month/year combination
+        Dictionary with predictions for each combo across time
     """
     # Get current date as reference point
     from datetime import datetime, timedelta
@@ -233,34 +140,170 @@ def predict_rent_time_series(input_features, months_range=12):
         'predictions': {}
     }
     
-    # Make predictions for each model type
-    for model_type, predictor in st.session_state.predictors.items():
-        if predictor and model_type in ['lstm', 'arima']:  # Only use temporal models
-            predictions = []
-            
-            for date in dates:
-                # Copy input features and add temporal information
-                date_input = input_features.copy()
-                date_input['year'] = date['year']
-                date_input['month'] = date['month']
+    # Use default values for block and street_name
+    block = "123"
+    street_name = "SAMPLE STREET"
+    
+    # Only make predictions if LSTM is loaded
+    if 'lstm' in st.session_state.predictors:
+        predictor = st.session_state.predictors['lstm']
+        
+        # For each combination
+        for town in towns:
+            for flat_type in flat_types:
+                combo_key = f"{town} - {flat_type}"
+                predictions = []
                 
-                try:
-                    prediction = predictor.predict(date_input)
-                    predictions.append(prediction)
-                except Exception as e:
-                    st.error(f"Error with {model_type} prediction for {date['label']}: {e}")
-                    predictions.append(None)
-            
-            time_series_results['predictions'][model_type] = predictions
+                for date in dates:
+                    # Copy input features and add temporal information
+                    date_input = {
+                        'town': town,
+                        'block': block,
+                        'street_name': street_name,
+                        'flat_type': flat_type,
+                        'year': date['year'],
+                        'month': date['month']
+                    }
+                    
+                    try:
+                        prediction = predictor.predict(date_input)
+                        predictions.append(prediction)
+                    except Exception as e:
+                        st.error(f"Error with LSTM prediction for {combo_key}, {date['label']}: {e}")
+                        predictions.append(None)
+                
+                time_series_results['predictions'][combo_key] = predictions
     
     return time_series_results
 
+# Function to calculate PICP (Prediction Interval Coverage Probability)
+def calculate_picp(y_true, y_pred_lower, y_pred_upper):
+    """Calculate percentage of true values that fall within prediction interval"""
+    within_interval = np.logical_and(y_true >= y_pred_lower, y_true <= y_pred_upper)
+    return np.mean(within_interval) * 100
+
+# Function to get model metrics
+def get_model_metrics():
+    """Get metrics for the LSTM model from metrics_log.json and lstm_info.json"""
+    model_type = "lstm"
+    metrics_sources = {}
+    
+    try:
+        # First try metrics_log.json (training metrics)
+        metrics_file = os.path.join("models", "metrics_log.json")
+        if os.path.exists(metrics_file):
+            with open(metrics_file, 'r') as f:
+                metrics_log = json.load(f)
+            
+            # Find the metrics for the specified model
+            for entry in metrics_log:
+                if entry['model_type'] == model_type:
+                    metrics_sources['metrics_log'] = entry.get('metrics', {})
+        
+        # Then try lstm_info.json (evaluation metrics)
+        model_info_file = os.path.join("models", f"{model_type}_info.json")
+        if os.path.exists(model_info_file):
+            with open(model_info_file, 'r') as f:
+                model_info = json.load(f)
+                metrics_sources['lstm_info'] = model_info.get('metrics', {})
+        
+        return metrics_sources
+    except Exception as e:
+        st.error(f"Error loading metrics: {e}")
+    
+    return {}
+
+# Function to get top features from model
+def get_top_features(data, n_features=3):
+    """Get top n features that influence the LSTM predictions using a surrogate model"""
+    try:
+        # Train a simple Random Forest as a surrogate model
+        X = data.drop('monthly_rent', axis=1)
+        # Drop temporal features to get base features
+        if 'month' in X.columns:
+            X = X.drop(['month', 'year'], axis=1)
+            
+        # Handle categorical features
+        X_encoded = pd.get_dummies(X)
+        
+        # Train surrogate model
+        surrogate_model = RandomForestRegressor(n_estimators=100, random_state=42)
+        surrogate_model.fit(X_encoded, data['monthly_rent'])
+        
+        # Get feature importances from surrogate model
+        importances = surrogate_model.feature_importances_
+        feature_names = X_encoded.columns
+        
+        # Sort and get top features
+        indices = np.argsort(importances)[::-1]
+        top_indices = indices[:n_features]
+        
+        # Return top feature names and importances
+        return [(feature_names[i], importances[i]) for i in top_indices]
+    except Exception as e:
+        st.error(f"Error getting top features: {e}")
+    
+    return []
+
+# Initialize session state variables if they don't exist
+if 'predictors' not in st.session_state:
+    st.session_state.predictors = {}
+if 'model_loaded' not in st.session_state:
+    st.session_state.model_loaded = False
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "Predict"
+
+# Application title
+st.title("Singapore Property Rental Prediction (LSTM Model)")
+
+# Sidebar for navigation
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "Select Page",
+    ["Predict", "Model Statistics"],
+    index=0 if st.session_state.current_page == "Predict" else 1
+)
+st.session_state.current_page = page
+
+# Model status indicator in sidebar
+st.sidebar.markdown("---")
+st.sidebar.markdown("### Model Status")
+
+# Auto-load LSTM model
+if not st.session_state.model_loaded:
+    with st.spinner("🔄 Loading LSTM model... Please wait..."):
+        predictor = load_model()
+        
+        if predictor:
+            # Store in session state
+            st.session_state.predictors["lstm"] = predictor
+            st.session_state.model_loaded = True
+            st.sidebar.success("✅ LSTM model loaded successfully!")
+        else:
+            st.sidebar.error("❌ Failed to load LSTM model.")
+
+# Show model status in sidebar
+if st.session_state.model_loaded:
+    st.sidebar.success("✅ LSTM model loaded and ready")
+else:
+    st.sidebar.warning("⚠️ LSTM model not loaded")
+
+# Footer in sidebar
+st.sidebar.markdown("---")
+st.sidebar.markdown("### About")
+st.sidebar.info(
+    "This application predicts rental prices for properties in Singapore "
+    "using an LSTM deep learning model trained on historical rental data."
+)
+
+# Handle page selection
 if page == "Predict":
+    # Main prediction interface
     st.header("Predict Monthly Rent")
     
-    # Check if at least one model is loaded
-    if not st.session_state.model_loaded and not st.session_state.model_trained:
-        st.warning("No models are loaded. Please go to 'Train Model' page to train new models or load existing ones.")
+    # Check if model is loaded
+    if not st.session_state.model_loaded:
+        st.warning("LSTM model is not loaded. Please check the error messages and refresh the page.")
     else:
         # Input form
         with st.form("prediction_form"):
@@ -270,631 +313,362 @@ if page == "Predict":
                 data = load_data(data_path)
                 towns = sorted(data['town'].unique())
                 flat_types = sorted(data['flat_type'].unique())
-                
-                # Debug: Print actual flat types in the data
-                print(f"[DEBUG] Actual flat types in data: {flat_types}")
             else:
                 towns = ["ANG MO KIO", "BEDOK", "BISHAN", "BUKIT BATOK", "BUKIT MERAH", "BUKIT PANJANG", 
-                         "BUKIT TIMAH", "CENTRAL AREA", "CHOA CHU KANG", "CLEMENTI", "GEYLANG", "HOUGANG", 
-                         "JURONG EAST", "JURONG WEST", "KALLANG/WHAMPOA", "MARINE PARADE", "PASIR RIS", 
-                         "PUNGGOL", "QUEENSTOWN", "SEMBAWANG", "SENGKANG", "SERANGOON", "TAMPINES", 
-                         "TOA PAYOH", "WOODLANDS", "YISHUN"]
+                        "BUKIT TIMAH", "CENTRAL AREA", "CHOA CHU KANG", "CLEMENTI", "GEYLANG", "HOUGANG", 
+                        "JURONG EAST", "JURONG WEST", "KALLANG/WHAMPOA", "MARINE PARADE", "PASIR RIS", 
+                        "PUNGGOL", "QUEENSTOWN", "SEMBAWANG", "SENGKANG", "SERANGOON", "TAMPINES", 
+                        "TOA PAYOH", "WOODLANDS", "YISHUN"]
                 flat_types = ["1 ROOM", "2 ROOM", "3 ROOM", "4 ROOM", "5 ROOM", "EXECUTIVE", "MULTI-GENERATION"]
             
-            col1, col2 = st.columns(2)
+            # Multi-select for towns (limit to 3)
+            selected_towns = st.multiselect(
+                "Select Towns (up to 3)",
+                towns,
+                default=[towns[0]],
+                max_selections=3
+            )
             
-            with col1:
-                town = st.selectbox("Town", towns)
-                flat_type = st.selectbox("Flat Type", flat_types)
+            # Multi-select for flat types (limit to 3)
+            selected_flat_types = st.multiselect(
+                "Select Flat Types (up to 3)",
+                flat_types,
+                default=[flat_types[2]],  # Default to 3 ROOM
+                max_selections=3
+            )
             
-            with col2:
-                block = st.text_input("Block Number", "123")
-                street_name = st.text_input("Street Name", "SAMPLE STREET")
+            # Help text
+            st.markdown("*Note: Block number and street name are fixed to standard values*")
             
             submit_button = st.form_submit_button("Predict Rent")
             
             if submit_button:
-                # Create input features
-                input_features = {
-                    'town': town,
-                    'block': block,
-                    'street_name': street_name,
-                    'flat_type': flat_type
-                }
-                
-                # Make predictions using all available models
-                predictions = predict_rent_multi(input_features)
-                
-                # if predictions:
-                #     # Display results
-                #     st.subheader("Predicted Monthly Rent from All Models")
+                # Validate selections
+                if not selected_towns:
+                    st.error("Please select at least one town")
+                elif not selected_flat_types:
+                    st.error("Please select at least one flat type")
+                else:
+                    # Make predictions for all combinations
+                    with st.spinner("Calculating predictions..."):
+                        results = predict_rent_multiple(selected_towns, selected_flat_types)
                     
-                #     # Create columns for each model prediction
-                #     model_cols = st.columns(len(predictions))
-                    
-                #     # Define model colors for consistency
-                #     model_colors = {
-                #         "xgboost": "#1f77b4",  # Blue
-                #         "lstm": "#2ca02c",     # Green
-                #         "arima": "#d62728"     # Red
-                #     }
-                    
-                #     # Display predictions
-                #     for i, (model_type, prediction) in enumerate(predictions.items()):
-                #         if prediction is not None:
-                #             with model_cols[i]:
-                #                 st.metric(
-                #                     f"{model_type.upper()} Prediction", 
-                #                     f"S${prediction:.2f}",
-                #                     delta=None
-                #                 )
-                    
-                #     # Create a bar chart comparing model predictions
-                #     fig = go.Figure()
-                    
-                #     for model_type, prediction in predictions.items():
-                #         if prediction is not None:
-                #             fig.add_trace(go.Bar(
-                #                 x=[model_type.upper()],
-                #                 y=[prediction],
-                #                 name=model_type.upper(),
-                #                 marker_color=model_colors.get(model_type.lower(), "gray")
-                #             ))
-                    
-                #     fig.update_layout(
-                #         title="Model Predictions Comparison",
-                #         xaxis_title="Model",
-                #         yaxis_title="Predicted Rent (S$)",
-                #         height=400
-                #     )
-                    
-                #     st.plotly_chart(fig)
-                    
-                #     # Additional analysis
-                #     st.subheader("Rental Analysis")
-                    
-                #     # Calculate average prediction across models
-                #     valid_predictions = [p for p in predictions.values() if p is not None]
-                #     if valid_predictions:
-                #         avg_prediction = sum(valid_predictions) / len(valid_predictions)
+                    if results:
+                        # Display current predictions in a table
+                        st.subheader("Current Monthly Rent Predictions")
                         
-                #         # Calculate annual rent based on average prediction
-                #         annual_rent = avg_prediction * 12
+                        # Create DataFrame for display
+                        results_df = pd.DataFrame(results)
                         
-                #         col1, col2 = st.columns(2)
+                        # Format the prediction column
+                        results_df['prediction'] = results_df['prediction'].apply(lambda x: f"S${x:.2f}")
                         
-                #         with col1:
-                #             st.metric("Average Monthly Rent (All Models)", f"S${avg_prediction:.2f}")
-                #             st.metric("Annual Rent (Based on Average)", f"S${annual_rent:.2f}")
+                        # Reshape for better display - pivot table with towns as rows and flat types as columns
+                        pivot_df = results_df.pivot(index='town', columns='flat_type', values='prediction')
                         
-                #         with col2:
-                #             # Compare with average rent for that town and flat type
-                #             if os.path.exists(data_path):
-                #                 avg_rent = data[(data['town'] == town) & (data['flat_type'] == flat_type)]['monthly_rent'].mean()
-                #                 diff = avg_prediction - avg_rent
-                #                 st.metric(f"Average Rent for {flat_type} in {town}", f"S${avg_rent:.2f}", f"{diff:+.2f}")
-                                
-                #                 # Comparison with similar properties
-                #                 st.markdown("### Similar Properties")
-                #                 similar = data[(data['town'] == town) & (data['flat_type'] == flat_type)].head(5)
-                #                 st.dataframe(similar[['block', 'street_name', 'monthly_rent']])
-                # else:
-                #     st.error("No predictions available. Please ensure at least one model is trained or loaded.")
-
-                # Generate time series prediction automatically (removed checkbox)
-                st.subheader("Rental Price Forecast (±12 Months)")
-                
-                # Make time series predictions
-                with st.spinner("Generating time series forecast..."):
-                    time_series_data = predict_rent_time_series(input_features)
-                
-                if time_series_data['predictions']:
-                    # Create line chart for time series predictions
-                    fig = go.Figure()
-                    
-                    # Define model colors for consistency
-                    model_colors = {
-                        "lstm": "#2ca02c",     # Green
-                        "arima": "#d62728"     # Red
-                    }
-                    
-                    reference_point = len(time_series_data['dates']) // 2
-                    
-                    # Display current month's prediction prominently
-                    st.subheader("Current Month Predicted Rent")
-                    current_predictions = {}
-                    prediction_cols = st.columns(len(time_series_data['predictions']))
-                    
-                    for i, (model_type, model_predictions) in enumerate(time_series_data['predictions'].items()):
-                        if any(p is not None for p in model_predictions):
-                            current_value = model_predictions[reference_point]
-                            if current_value is not None:
-                                current_predictions[model_type] = current_value
-                                with prediction_cols[i]:
-                                    st.metric(
-                                        f"{model_type.upper()} Prediction", 
-                                        f"S${current_value:.2f}"
-                                    )
-                    
-                    # Calculate and display average if multiple models are available
-                    if len(current_predictions) > 1:
-                        avg_current = sum(current_predictions.values()) / len(current_predictions)
-                        st.metric("Average Prediction", f"S${avg_current:.2f}")
-                    
-                    # Create a DataFrame for tabular display
-                    table_data = {"Date": time_series_data['dates']}
-                    
-                    # Calculate min/max values for y-axis range
-                    all_values = []
-                    
-                    for model_type, model_predictions in time_series_data['predictions'].items():
-                        if any(p is not None for p in model_predictions):
-                            # Add to plot
-                            fig.add_trace(go.Scatter(
-                                x=time_series_data['dates'],
-                                y=model_predictions,
-                                mode='lines+markers',
-                                name=f"{model_type.upper()} Forecast",
-                                line=dict(color=model_colors.get(model_type.lower(), "gray"), width=2),
-                                hoverinfo='text',
-                                hovertext=[f"{date}: S${pred:.2f}" for date, pred in 
-                                          zip(time_series_data['dates'], model_predictions)]
-                            ))
+                        # Display the pivot table
+                        st.dataframe(pivot_df, use_container_width=True)
+                        
+                        # Generate time series prediction automatically
+                        st.subheader("Rental Price Forecast (±12 Months)")
+                        
+                        # Make time series predictions
+                        with st.spinner("Generating time series forecast..."):
+                            time_series_data = predict_rent_time_series_multiple(selected_towns, selected_flat_types)
+                        
+                        if time_series_data['predictions']:
+                            # Create line chart for time series predictions
+                            fig = go.Figure()
                             
-                            # Add to table data
-                            table_data[f"{model_type.upper()}"] = [f"S${pred:.2f}" if pred is not None else "N/A" 
-                                                                  for pred in model_predictions]
+                            reference_point = len(time_series_data['dates']) // 2
                             
-                            # Add to values list for y-axis range calculation
-                            all_values.extend([v for v in model_predictions if v is not None])
-                    
-                    # Add a vertical line for current date
-                    fig.add_shape(
-                        type="line",
-                        x0=time_series_data['dates'][reference_point],
-                        y0=min(all_values) * 0.95 if all_values else 0,
-                        x1=time_series_data['dates'][reference_point],
-                        y1=max(all_values) * 1.05 if all_values else 0,
-                        line=dict(color="black", width=1, dash="dash"),
-                    )
-                    
-                    # Add annotation for current date
-                    fig.add_annotation(
-                        x=time_series_data['dates'][reference_point],
-                        y=min(all_values) * 0.95 if all_values else 0,
-                        text="Current Month",
-                        showarrow=True,
-                        arrowhead=1,
-                        ax=0,
-                        ay=25
-                    )
-                    
-                    # Set y-axis range to not start from zero
-                    y_min = min(all_values) * 0.95 if all_values else 0
-                    y_max = max(all_values) * 1.05 if all_values else 0
-                    
-                    fig.update_layout(
-                        title="Rental Price Forecast Over Time",
-                        xaxis_title="Date",
-                        yaxis_title="Predicted Rent (S$)",
-                        legend_title="Model",
-                        hovermode="closest",
-                        height=500,
-                        yaxis=dict(range=[y_min, y_max])
-                    )
-                    
-                    # Add zone highlighting
-                    # Past zone (light gray)
-                    fig.add_shape(
-                        type="rect",
-                        xref="x",
-                        yref="y",
-                        x0=time_series_data['dates'][0],
-                        y0=y_min,
-                        x1=time_series_data['dates'][reference_point-1],
-                        y1=y_max,
-                        fillcolor="lightgray",
-                        opacity=0.2,
-                        layer="below",
-                        line_width=0,
-                    )
-
-                    # Current zone (light green)
-                    fig.add_shape(
-                        type="rect",
-                        xref="x",
-                        yref="y",
-                        x0=time_series_data['dates'][reference_point],
-                        y0=y_min,
-                        x1=time_series_data['dates'][reference_point],
-                        y1=y_max,
-                        fillcolor="rgb(0, 255, 0)",
-                        opacity=0.3,
-                        layer="below",
-                        line_width=0,
-                    )
-
-                    # Future zone (light blue)
-                    fig.add_shape(
-                        type="rect",
-                        xref="x",
-                        yref="y",
-                        x0=time_series_data['dates'][reference_point+1],
-                        y0=y_min,
-                        x1=time_series_data['dates'][-1],
-                        y1=y_max,
-                        fillcolor="lightblue",
-                        opacity=0.2,
-                        layer="below",
-                        line_width=0,
-                    )
-
-                    # Add annotations for zones
-                    fig.add_annotation(
-                        x=time_series_data['dates'][reference_point//2],
-                        y=y_max*0.95,
-                        text="Historical Data",
-                        showarrow=False,
-                        font=dict(size=12)
-                    )
-
-                    fig.add_annotation(
-                        x=time_series_data['dates'][reference_point],
-                        y=y_max*0.95,
-                        text="Current",
-                        showarrow=False,
-                        font=dict(size=12)
-                    )
-
-                    fig.add_annotation(
-                        x=time_series_data['dates'][reference_point + (len(time_series_data['dates'])-reference_point)//2],
-                        y=y_max*0.95,
-                        text="Forecast",
-                        showarrow=False,
-                        font=dict(size=12)
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Display tabular data
-                    st.subheader("Monthly Forecast Values")
-                    forecast_df = pd.DataFrame(table_data)
-                    
-                    # Highlight current month row
-                    def highlight_current_month(row):
-                        if row.name == reference_point:
-                            return ['background-color: #0A0'] * len(row)
-                        return [''] * len(row)
-                    
-                    # Display the table with styling
-                    st.dataframe(
-                        forecast_df.style.apply(highlight_current_month, axis=1),
-                        use_container_width=True
-                    )
-                    
-                    # Add an explanation of the forecast
-                    with st.expander("About this forecast"):
-                        st.markdown("""
-                        This forecast shows predicted rental prices for the selected property over time (12 months 
-                        before and after the current date). Note that:
-                        
-                        * Only temporal models (LSTM and ARIMA) are used for time series predictions
-                        * XGBoost is excluded because it doesn't utilize temporal features
-                        * The vertical dashed line represents the current month
-                        * Past predictions show what the rental price likely was historically
-                        * Future predictions show expected rental price trends
-                        * The current month is highlighted in the table
-                        """)
-                else:
-                    st.warning("Time series forecast requires temporal models (LSTM or ARIMA). Please train or load these models.")
-
-# Train Model Page
-elif page == "Train Model":
-    st.header("Train or Load Models")
-    
-    tab1, tab2 = st.tabs(["Train New Models", "Load Existing Models"])
-    
-    with tab1:
-        st.subheader("Train New Rental Prediction Models")
-        
-        # Data loading section
-        data_path = "data/RentingOutofFlats2025.csv"
-        
-        if os.path.exists(data_path):
-            st.success(f"Found existing dataset: {data_path}")
-            use_existing = st.checkbox("Use existing dataset", value=True)
-            
-            if use_existing:
-                data = load_data(data_path)
-            else:
-                uploaded_file = st.file_uploader("Upload rental data CSV file", type=["csv"])
-                if uploaded_file is not None:
-                    data = pd.read_csv(uploaded_file)
-                else:
-                    data = None
-        else:
-            st.warning("No existing dataset found in the data directory.")
-            uploaded_file = st.file_uploader("Upload rental data CSV file", type=["csv"])
-            if uploaded_file is not None:
-                data = pd.read_csv(uploaded_file)
-            else:
-                data = None
-        
-        if data is not None:
-            st.write(f"Dataset shape: {data.shape}")
-            st.dataframe(data.head())
-            
-            # Model selection
-            model_types = st.multiselect(
-                "Select Models to Train", 
-                ["xgboost", "lstm", "arima"],
-                default=["lstm"],
-                help="XGBoost uses categorical features only, LSTM and ARIMA use temporal features"
-            )
-            
-            # Add information about feature usage
-            st.info("""
-            **Feature Usage by Model:**
-            - **XGBoost**: Uses categorical features (town, flat_type, block, street_name) only
-            - **LSTM**: Uses all features including temporal (month, year)
-            - **ARIMA**: Uses temporal features primarily
-            """)
-            
-            # Hyperparameter tuning option
-            tune_hyperparams = st.checkbox("Tune Hyperparameters (XGBoost only)", value=False)
-            
-            if st.button("Train Selected Models"):
-                if not model_types:
-                    st.error("Please select at least one model type to train.")
-                else:
-                    # Initialize data processor
-                    data_processor = DataProcessor()
-                    
-                    # Preprocess data once for all models
-                    with st.spinner("Preprocessing data for all models..."):
-                        processed_data = data_processor.preprocess_data(data)
-                    
-                    # Store data processor in session state
-                    st.session_state.data_processor = data_processor
-                    
-                    # Train each selected model
-                    for model_type in model_types:
-                        with st.spinner(f"Training {model_type.upper()} model... This may take a while."):
-                            # Train model with appropriate data
-                            predictor = train_model(
-                                data_processor, processed_data, model_type, 
-                                tune_hyperparams if model_type == "xgboost" else False
+                            # Create a color palette with enough distinct colors
+                            colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", 
+                                    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+                            
+                            # Calculate min/max values for y-axis range
+                            all_values = []
+                            
+                            # Create a DataFrame for tabular display
+                            table_data = {"Date": time_series_data['dates']}
+                            
+                            # Add each combination as a line on the plot
+                            color_index = 0
+                            for combo_key, predictions in time_series_data['predictions'].items():
+                                if any(p is not None for p in predictions):
+                                    # Add to plot
+                                    fig.add_trace(go.Scatter(
+                                        x=time_series_data['dates'],
+                                        y=predictions,
+                                        mode='lines+markers',
+                                        name=combo_key,
+                                        line=dict(color=colors[color_index % len(colors)], width=2),
+                                        hoverinfo='text',
+                                        hovertext=[f"{combo_key}, {date}: S${pred:.2f}" for date, pred in 
+                                                zip(time_series_data['dates'], predictions)]
+                                    ))
+                                    
+                                    # Add to table data
+                                    table_data[combo_key] = [f"S${pred:.2f}" if pred is not None else "N/A" 
+                                                            for pred in predictions]
+                                    
+                                    # Add to values list for y-axis range calculation
+                                    all_values.extend([v for v in predictions if v is not None])
+                                    
+                                    # Increment color index
+                                    color_index += 1
+                            
+                            # Add a vertical line for current date
+                            fig.add_shape(
+                                type="line",
+                                x0=time_series_data['dates'][reference_point],
+                                y0=min(all_values) * 0.95 if all_values else 0,
+                                x1=time_series_data['dates'][reference_point],
+                                y1=max(all_values) * 1.05 if all_values else 0,
+                                line=dict(color="black", width=1, dash="dash"),
                             )
                             
-                            if predictor:
-                                # Store predictor in session state
-                                st.session_state.predictors[model_type] = predictor
-                                st.session_state.model_trained = True
-                                st.session_state.model_loaded = True
-                                
-                                st.success(f"{model_type.upper()} model trained successfully!")
-                    
-                    st.success("All selected models trained! Go to the 'Predict' page to make predictions.")
-    
-    with tab2:
-        st.subheader("Load Existing Models")
-        
-        # Get available models
-        trainer = ModelTrainer()
-        available_models = trainer.get_available_models()
-        
-        if available_models:
-            st.write("Available Models:")
-            
-            # Display available models
-            for model in available_models:
-                with st.expander(f"{model['type'].upper()} Model"):
-                    info = model['info']
-                    st.write(f"**Type:** {info.get('model_type', 'Unknown')}")
-                    if 'metrics' in info:
-                        metrics = info['metrics']
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.metric("RMSE", f"{metrics.get('rmse', 0):.2f}")
-                            st.metric("MAE", f"{metrics.get('mae', 0):.2f}")
-                        with col2:
-                            st.metric("MAPE", f"{metrics.get('mape', 0):.2f}%")
-                            st.metric("R²", f"{metrics.get('r2', 0):.2f}")
-                    if 'created_at' in info:
-                        st.write(f"**Created:** {info['created_at']}")
-            
-            # Select models to load
-            models_to_load = st.multiselect(
-                "Select Models to Load",
-                [m['type'] for m in available_models]
-            )
-            
-            if models_to_load and st.button("Load Selected Models"):
-                # Check if preprocessor exists
-                preprocessor_path = os.path.join("models", "data_processor.pkl")
-                
-                if os.path.exists(preprocessor_path):
-                    # Load preprocessor
-                    data_processor = DataProcessor()
-                    predictor = RentalPredictor()
-                    success = predictor.load_preprocessor(preprocessor_path)
-                    
-                    if success:
-                        st.session_state.data_processor = predictor.preprocessor
-                        
-                        # Load each selected model
-                        for model_type in models_to_load:
-                            with st.spinner(f"Loading {model_type.upper()} model..."):
-                                new_predictor = RentalPredictor(
-                                    preprocessor=predictor.preprocessor
+                            # Set y-axis range to not start from zero
+                            y_min = min(all_values) * 0.95 if all_values else 0
+                            y_max = max(all_values) * 1.05 if all_values else 0
+                            
+                            fig.update_layout(
+                                title="Rental Price Forecast Over Time (LSTM Model)",
+                                xaxis_title="Date",
+                                yaxis_title="Predicted Rent (S$)",
+                                hovermode="closest",
+                                height=600,  # Increased height for better visibility
+                                yaxis=dict(range=[y_min, y_max]),
+                                legend=dict(
+                                    orientation="h",
+                                    yanchor="bottom",
+                                    y=1.02,
+                                    xanchor="center",
+                                    x=0.5
                                 )
-                                
-                                success = new_predictor.load_from_file(model_type)
-                                
-                                if success:
-                                    st.session_state.predictors[model_type] = new_predictor
-                                    st.session_state.model_loaded = True
-                                    st.success(f"{model_type.upper()} model loaded successfully!")
-                                else:
-                                    st.error(f"Failed to load {model_type.upper()} model.")
-                        
-                        if st.session_state.model_loaded:
-                            st.success("All selected models loaded! Go to the 'Predict' page to make predictions.")
-                    else:
-                        st.error("Failed to load preprocessor.")
-                else:
-                    st.error("Preprocessor not found. Please train models first to create a preprocessor.")
-        else:
-            st.warning("No trained models found. Please train models first.")
+                            )
+                            
+                            # Add zone highlighting
+                            # Past zone (light gray)
+                            fig.add_shape(
+                                type="rect",
+                                xref="x",
+                                yref="y",
+                                x0=time_series_data['dates'][0],
+                                y0=y_min,
+                                x1=time_series_data['dates'][reference_point-1],
+                                y1=y_max,
+                                fillcolor="lightgray",
+                                opacity=0.2,
+                                layer="below",
+                                line_width=0,
+                            )
 
-# Model Performance Page
-elif page == "Model Performance":
-    st.header("Model Performance Metrics")
+                            # Current zone (light green)
+                            fig.add_shape(
+                                type="rect",
+                                xref="x",
+                                yref="y",
+                                x0=time_series_data['dates'][reference_point],
+                                y0=y_min,
+                                x1=time_series_data['dates'][reference_point],
+                                y1=y_max,
+                                fillcolor="rgb(0, 255, 0)",
+                                opacity=0.3,
+                                layer="below",
+                                line_width=0,
+                            )
+
+                            # Future zone (light blue)
+                            fig.add_shape(
+                                type="rect",
+                                xref="x",
+                                yref="y",
+                                x0=time_series_data['dates'][reference_point+1],
+                                y0=y_min,
+                                x1=time_series_data['dates'][-1],
+                                y1=y_max,
+                                fillcolor="lightblue",
+                                opacity=0.2,
+                                layer="below",
+                                line_width=0,
+                            )
+
+                            # Add annotations for zones
+                            fig.add_annotation(
+                                x=time_series_data['dates'][reference_point//2],
+                                y=y_max*0.95,
+                                text="Historical Data",
+                                showarrow=False,
+                                font=dict(size=12)
+                            )
+
+                            fig.add_annotation(
+                                x=time_series_data['dates'][reference_point],
+                                y=y_max*0.95,
+                                text="Current",
+                                showarrow=False,
+                                font=dict(size=12)
+                            )
+
+                            fig.add_annotation(
+                                x=time_series_data['dates'][reference_point + (len(time_series_data['dates'])-reference_point)//2],
+                                y=y_max*0.95,
+                                text="Forecast",
+                                showarrow=False,
+                                font=dict(size=12)
+                            )
+                            
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Display tabular data
+                            st.subheader("Monthly Forecast Values")
+                            forecast_df = pd.DataFrame(table_data)
+                            
+                            # Highlight current month row
+                            def highlight_current_month(row):
+                                if row.name == reference_point:
+                                    return ['background-color: #0A0'] * len(row)
+                                return [''] * len(row)
+                            
+                            # Display the table with styling
+                            st.dataframe(
+                                forecast_df.style.apply(highlight_current_month, axis=1),
+                                use_container_width=True
+                            )
+                            
+                            # Add an explanation of the forecast
+                            with st.expander("About this forecast"):
+                                st.markdown("""
+                                This forecast shows predicted rental prices for the selected properties over time (12 months 
+                                before and after the current date). The LSTM model uses historical patterns to predict 
+                                future rental trends and shows what the rental price likely was historically.
+                                
+                                * The vertical dashed line represents the current month
+                                * Past predictions show what the rental price likely was historically (gray area)
+                                * Future predictions show expected rental price trends (blue area)
+                                * The current month is highlighted in green
+                                * You can compare up to 9 different town/flat type combinations
+                                """)
+                        else:
+                            st.warning("Unable to generate time series forecast. Please check if the LSTM model is loaded correctly.")
+
+elif page == "Model Statistics":
+    st.header("LSTM Model Performance Statistics")
     
-    # Check for metrics log
-    metrics_file = os.path.join("models", "metrics_log.json")
-    
-    if os.path.exists(metrics_file):
-        with open(metrics_file, 'r') as f:
-            metrics_log = json.load(f)
-        
-        if metrics_log:
-            st.subheader("Model Performance History")
-            
-            # Convert to DataFrame for easier manipulation
-            df_metrics = pd.DataFrame(metrics_log)
-            
-            # Add simplified timestamp
-            df_metrics['timestamp'] = pd.to_datetime(df_metrics['timestamp'])
-            df_metrics['date'] = df_metrics['timestamp'].dt.strftime('%Y-%m-%d %H:%M')
-            
-            # Display metrics table
-            st.dataframe(
-                df_metrics[['model_type', 'date', 'metrics']].to_dict('records'),
-                use_container_width=True
-            )
-            
-            # Plot metrics comparison
-            st.subheader("Metrics Comparison")
-            
-            # Extract metrics for plotting
-            plot_data = []
-            for entry in metrics_log:
-                metrics = entry['metrics']
-                plot_data.append({
-                    'Model': entry['model_type'].upper(),
-                    'RMSE': metrics.get('rmse', 0),
-                    'MAE': metrics.get('mae', 0),
-                    'MAPE': metrics.get('mape', 0),
-                    'R²': metrics.get('r2', 0)
-                })
-            
-            plot_df = pd.DataFrame(plot_data)
-            
-            # Use tabs for different metric visualizations
-            metric_tabs = st.tabs(["RMSE", "MAE", "MAPE", "R²"])
-            
-            with metric_tabs[0]:  # RMSE
-                fig_rmse = px.bar(
-                    plot_df, 
-                    x='Model', 
-                    y='RMSE',
-                    title='Root Mean Squared Error (RMSE) Comparison',
-                    color='Model'
-                )
-                st.plotly_chart(fig_rmse)
-            
-            with metric_tabs[1]:  # MAE
-                fig_mae = px.bar(
-                    plot_df, 
-                    x='Model', 
-                    y='MAE',
-                    title='Mean Absolute Error (MAE) Comparison',
-                    color='Model'
-                )
-                st.plotly_chart(fig_mae)
-            
-            with metric_tabs[2]:  # MAPE
-                fig_mape = px.bar(
-                    plot_df, 
-                    x='Model', 
-                    y='MAPE',
-                    title='Mean Absolute Percentage Error (MAPE) Comparison',
-                    color='Model'
-                )
-                st.plotly_chart(fig_mape)
-            
-            with metric_tabs[3]:  # R²
-                fig_r2 = px.bar(
-                    plot_df, 
-                    x='Model', 
-                    y='R²',
-                    title='R-squared (R²) Comparison',
-                    color='Model'
-                )
-                st.plotly_chart(fig_r2)
-            
-            # Model details
-            st.subheader("Model Details")
-            
-            # Select model for details
-            selected_model = st.selectbox(
-                "Select Model for Details",
-                plot_df['Model'].tolist()
-            )
-            
-            # Find the selected model's entry
-            selected_entry = next(
-                (entry for entry in metrics_log if entry['model_type'].upper() == selected_model),
-                None
-            )
-            
-            if selected_entry:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("### Parameters")
-                    params = selected_entry.get('params', {})
-                    for param, value in params.items():
-                        st.text(f"{param}: {value}")
-                
-                with col2:
-                    st.markdown("### Metrics")
-                    metrics = selected_entry['metrics']
-                    st.metric("RMSE", f"{metrics.get('rmse', 0):.2f}")
-                    st.metric("MAE", f"{metrics.get('mae', 0):.2f}")
-                    st.metric("MAPE", f"{metrics.get('mape', 0):.2f}%")
-                    st.metric("R²", f"{metrics.get('r2', 0):.2f}")
-                
-                # Display model artifacts if available
-                st.markdown("### Model Artifacts")
-                model_type = selected_entry['model_type']
-                
-                # Check for visualizations
-                artifacts = {
-                    'Feature Importance': f"models/{model_type}_feature_importance.png",
-                    'Training History': f"models/{model_type}_training_history.png",
-                    'Predictions': f"models/{model_type}_predictions.png"
-                }
-                
-                for artifact_name, artifact_path in artifacts.items():
-                    if os.path.exists(artifact_path):
-                        st.image(artifact_path, caption=artifact_name)
-        else:
-            st.warning("No metrics history found.")
+    # Check if LSTM model is loaded
+    if not st.session_state.model_loaded or 'lstm' not in st.session_state.predictors:
+        st.warning("LSTM model is not loaded. Please go to the Predict page to load the model first.")
     else:
-        st.warning("No metrics log found. Train models to see performance metrics.")
+        # Load data for feature analysis
+        data_path = "data/RentingOutofFlats2025.csv"
+        if os.path.exists(data_path):
+            data = load_data(data_path)
+            
+            # Get metrics for LSTM model from both sources
+            metrics_sources = get_model_metrics()
+            
+            # Add tabs to show both sets of metrics
+            tabs = st.tabs(["Evaluation Metrics", "Training Metrics", "Comparison"])
+            
+            # Evaluation metrics tab (from lstm_info.json)
+            with tabs[0]:
+                if 'lstm_info' in metrics_sources:
+                    metrics = metrics_sources['lstm_info']
+                    st.subheader("Evaluation Metrics (from lstm_info.json)")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("RMSE", f"{metrics.get('rmse', 'N/A'):.2f}" if 'rmse' in metrics else "N/A")
+                    with col2:
+                        st.metric("MAPE", f"{metrics.get('mape', 'N/A'):.2f}%" if 'mape' in metrics else "N/A")
+                    with col3:
+                        # Use actual PICP from metrics instead of hardcoded value
+                        picp_value = metrics.get('picp', 0.0)
+                        st.metric("PICP", f"{picp_value*100:.1f}%" if isinstance(picp_value, (int, float)) else "N/A")
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("R² Score", f"{metrics.get('r2', 'N/A'):.4f}" if 'r2' in metrics else "N/A")
+                    with col2:
+                        mpiw_value = metrics.get('mpiw', 0.0)
+                        st.metric("MPIW", f"{mpiw_value:.2f}" if isinstance(mpiw_value, (int, float)) else "N/A")
+                    
+                    # Show feature importance if available
+                    if 'feature_importance' in metrics:
+                        st.subheader("Feature Importance")
+                        feature_imp = metrics['feature_importance']
+                        feature_df = pd.DataFrame({
+                            'Feature': list(feature_imp.keys()),
+                            'Importance': list(feature_imp.values())
+                        }).sort_values('Importance', ascending=False)
+                        
+                        fig = px.bar(feature_df, x='Feature', y='Importance', title="Feature Importance")
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No evaluation metrics found in lstm_info.json")
+                    
+            # Training metrics tab (from metrics_log.json)
+            with tabs[1]:
+                if 'metrics_log' in metrics_sources:
+                    metrics = metrics_sources['metrics_log']
+                    st.subheader("Training Metrics (from metrics_log.json)")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("RMSE", f"{metrics.get('rmse', 'N/A'):.2f}" if 'rmse' in metrics else "N/A")
+                    with col2:
+                        st.metric("MAPE", f"{metrics.get('mape', 'N/A'):.2f}%" if 'mape' in metrics else "N/A")
+                    with col3:
+                        st.metric("MAE", f"{metrics.get('mae', 'N/A'):.2f}" if 'mae' in metrics else "N/A")
+                    
+                    st.metric("R² Score", f"{metrics.get('r2', 'N/A'):.4f}" if 'r2' in metrics else "N/A")
+                    
+                    if 'mse' in metrics:
+                        st.metric("MSE", f"{metrics.get('mse', 'N/A'):.2f}")
+                else:
+                    st.warning("No training metrics found in metrics_log.json")
+            
+            # Comparison tab to explain differences
+            with tabs[2]:
+                st.subheader("Understanding the Metrics Differences")
+                st.markdown("""
+                ### Why are the metrics different?
 
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.markdown("### About")
-st.sidebar.info(
-    "This application predicts rental prices for properties in Singapore. "
-    "It uses multiple machine learning models (XGBoost, LSTM, ARIMA) trained on historical rental data."
-)
-st.sidebar.markdown("### Instructions")
-st.sidebar.info(
-    "1. Train models or load existing ones from the 'Train Model' page\n"
-    "2. Go to the 'Predict' page to make rental predictions with all models\n"
-    "3. Check model performance metrics on the 'Model Performance' page"
-)
+                The two JSON files contain metrics calculated at different stages:
+
+                1. **metrics_log.json**: Contains metrics calculated during model training, typically on validation data.
+                
+                2. **lstm_info.json**: Contains metrics from a more comprehensive evaluation, including:
+                   - Prediction intervals (PICP, MPIW)
+                   - Feature importance analysis
+                   - Metrics on different test/evaluation data
+
+                #### Key differences:
+                - **RMSE**: 493.39 (training) vs 1082.76 (evaluation)
+                - **MAPE**: 14.94% (training) vs 38.39% (evaluation)
+                
+                The evaluation metrics are likely more representative of real-world performance, as they were calculated on separate test data or using a different evaluation methodology.
+                """)
+                
+                # Create comparison table
+                if 'metrics_log' in metrics_sources and 'lstm_info' in metrics_sources:
+                    training = metrics_sources['metrics_log']
+                    evaluation = metrics_sources['lstm_info']
+                    
+                    compare_data = {
+                        'Metric': ['RMSE', 'MAPE', 'R²'],
+                        'Training Value': [
+                            f"{training.get('rmse', 'N/A'):.2f}",
+                            f"{training.get('mape', 'N/A'):.2f}%",
+                            f"{training.get('r2', 'N/A'):.4f}"
+                        ],
+                        'Evaluation Value': [
+                            f"{evaluation.get('rmse', 'N/A'):.2f}",
+                            f"{evaluation.get('mape', 'N/A'):.2f}%",
+                            f"{evaluation.get('r2', 'N/A'):.4f}"
+                        ]
+                    }
+                    
+                    st.subheader("Metrics Comparison")
+                    st.table(pd.DataFrame(compare_data))
