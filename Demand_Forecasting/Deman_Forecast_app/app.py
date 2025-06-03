@@ -1,5 +1,3 @@
-# streamlit_app.py not ready yet
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,7 +6,15 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
-
+st.markdown("""
+    <style>
+        .block-container {
+            padding-left: 2rem;
+            padding-right: 2rem;
+            max-width: 95%;
+        }
+    </style>
+""", unsafe_allow_html=True)
 # Load models
 @st.cache_resource
 def load_models():
