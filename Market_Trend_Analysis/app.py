@@ -6,7 +6,6 @@ from sklearn.preprocessing import LabelEncoder
 import mlflow
 
 mlflow.set_experiment("AOP_Market_Trend_Analysis")
-
 st.set_page_config(page_title="AOP Market Trend Analysis Tool", layout="wide")
 
 # --- Label Encoders ---
@@ -31,9 +30,30 @@ flat_models = ['IMPROVED', 'NEW GENERATION', 'MODEL A', 'STANDARD', 'SIMPLIFIED'
                'MODEL A2', 'TYPE S1', 'TYPE S2', 'PREMIUM APARTMENT', 'MULTI GENERATION']
 le_flat_model = LabelEncoder().fit(flat_models)
 
+# --- Load Property Info and Resale Index Data ---
+@st.cache_data
+def load_property_info():
+    df_property = pd.read_csv('HDBPropertyInformation.csv')
+    df_property['block'] = df_property['blk_no'].astype(str).str.strip().str.upper()
+    df_property['street_name'] = df_property['street'].astype(str).str.strip().str.upper()
+    return df_property
+
+@st.cache_data
+def load_resale_index():
+    df_resale_idx = pd.read_csv('HDBResalePriceIndex1Q2009100Quarterly.csv')
+    return df_resale_idx
+
+df_property = load_property_info()
+df_resale_index = load_resale_index()
+
 # --- Load Model ---
-model = xgb.XGBRegressor()
-model.load_model("xgboost_market_trend_analysis.json")
+@st.cache_resource
+def load_model():
+    model = xgb.XGBRegressor()
+    model.load_model("xgboost_market_trend_analysis.json")
+    return model
+
+model = load_model()
 
 # --- Load Data ---
 @st.cache_data
@@ -67,6 +87,30 @@ year = st.sidebar.selectbox("Transaction Year", list(range(1990, 2024)), index=3
 month_num = st.sidebar.selectbox("Transaction Month", list(range(1, 13)), index=0)
 
 quarter = ((month_num - 1) // 3) + 1
+
+# Calculate quarter label
+quarter_label = f"{year}Q{quarter}"
+
+property_match = df_property
+
+# Since property dae doesn't have town / flat_type info, just use default:
+if not df_property.empty:
+    year_completed = int(df_property['year_completed'].median())
+    total_dwelling_units = int(df_property['total_dwelling_units'].median())
+else:
+    year_completed = lease_commence
+    total_dwelling_units = 0
+
+building_age = year - year_completed
+
+# Lookup resale index:
+index_match = df_resale_index[df_resale_index['quarter'] == quarter_label]
+if not index_match.empty:
+    resale_index_value = float(index_match['index'].iloc[0])
+else:
+    resale_index_value = df_resale_index['index'].mean()
+
+# Build model input:
 encoded_input = pd.DataFrame([{
     'town': le_town.transform([town])[0],
     'flat_type': le_flat_type.transform([flat_type])[0],
@@ -76,9 +120,13 @@ encoded_input = pd.DataFrame([{
     'flat_model': le_flat_model.transform([flat_model])[0],
     'lease_commence_date': lease_commence,
     'remaining_lease': remaining_lease,
+    'year_completed': year_completed,
+    'total_dwelling_units': total_dwelling_units,
     'year': year,
     'month_num': month_num,
-    'quarter': quarter
+    'quarter': quarter,
+    'building_age': building_age,
+    'index': resale_index_value
 }])
 
 if st.sidebar.button("💡 Predict Price"):
