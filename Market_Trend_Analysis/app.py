@@ -9,6 +9,7 @@ mlflow.set_experiment("AOP_Market_Trend_Analysis")
 st.set_page_config(page_title="AOP Market Trend Analysis Tool", layout="wide")
 
 # --- Label Encoders ---
+print("[DEBUG] Initializing label encoders...")
 town_classes = ['ANG MO KIO', 'BEDOK', 'BISHAN', 'BUKIT BATOK', 'BUKIT MERAH',
                 'BUKIT PANJANG', 'BUKIT TIMAH', 'CENTRAL AREA', 'CHOA CHU KANG',
                 'CLEMENTI', 'GEYLANG', 'HOUGANG', 'JURONG EAST', 'JURONG WEST',
@@ -33,6 +34,7 @@ le_flat_model = LabelEncoder().fit(flat_models)
 # --- Load Property Info and Resale Index Data ---
 @st.cache_data
 def load_property_info():
+    print("[DEBUG] Loading HDB Property Information...")
     df_property = pd.read_csv('HDBPropertyInformation.csv')
     df_property['block'] = df_property['blk_no'].astype(str).str.strip().str.upper()
     df_property['street_name'] = df_property['street'].astype(str).str.strip().str.upper()
@@ -40,6 +42,7 @@ def load_property_info():
 
 @st.cache_data
 def load_resale_index():
+    print("[DEBUG] Loading Resale Index...")
     df_resale_idx = pd.read_csv('HDBResalePriceIndex1Q2009100Quarterly.csv')
     return df_resale_idx
 
@@ -49,6 +52,7 @@ df_resale_index = load_resale_index()
 # --- Load Model ---
 @st.cache_resource
 def load_model():
+    print("[DEBUG] Loading trained XGBoost model...")
     model = xgb.XGBRegressor()
     model.load_model("xgboost_market_trend_analysis.json")
     return model
@@ -58,6 +62,7 @@ model = load_model()
 # --- Load Data ---
 @st.cache_data
 def load_full_data():
+    print("[DEBUG] Loading resale transaction data...")
     dfs = [
         pd.read_csv(f) for f in [
             'Resale Flat Prices (Based on Approval Date), 1990 - 1999.csv',
@@ -76,24 +81,36 @@ df_full = load_full_data()
 
 # --- Sidebar Prediction Tool ---
 st.sidebar.header("🔍 Predict Resale Price")
+
+# Enable future prediction mode
+future_mode = st.sidebar.checkbox("🕰️ Future Prediction Mode", value=False)
+
+# Allow selections for user 
 town = st.sidebar.selectbox("Town", town_classes)
 flat_type = st.sidebar.selectbox("Flat Type", flat_types)
 storey_range = st.sidebar.selectbox("Storey Range", storey_ranges)
 flat_model = st.sidebar.selectbox("Flat Model", flat_models)
 floor_area = st.sidebar.number_input("Floor Area (sqm)", min_value=30, max_value=200, value=80)
-lease_commence = st.sidebar.number_input("Lease Commence Year", min_value=1960, max_value=2023, value=2000)
+lease_commence = st.sidebar.number_input("Lease Commence Year", min_value=1960, max_value=2030, value=2000)
 remaining_lease = st.sidebar.number_input("Remaining Lease (Years)", min_value=1, max_value=99, value=78)
-year = st.sidebar.selectbox("Transaction Year", list(range(1990, 2024)), index=33)
+
+# Modify year range if future mode is selected
+if future_mode:
+    year_range = list(range(1990, 2030))
+else:
+    year_range = list(range(1990, 2024))
+
+year = st.sidebar.selectbox("Transaction Year", year_range, index=year_range.index(min(2023, max(year_range))))
 month_num = st.sidebar.selectbox("Transaction Month", list(range(1, 13)), index=0)
 
 quarter = ((month_num - 1) // 3) + 1
-
-# Calculate quarter label
 quarter_label = f"{year}Q{quarter}"
+
+print(f"[DEBUG] Inputs selected: {town}, {flat_type}, {storey_range}, Year: {year}, Month: {month_num}, Quarter: {quarter_label}")
 
 property_match = df_property
 
-# Since property dae doesn't have town / flat_type info, just use default:
+# Fallback for property info
 if not df_property.empty:
     year_completed = int(df_property['year_completed'].median())
     total_dwelling_units = int(df_property['total_dwelling_units'].median())
@@ -103,12 +120,15 @@ else:
 
 building_age = year - year_completed
 
-# Lookup resale index:
+# Resale Index Logic — extended for future mode
 index_match = df_resale_index[df_resale_index['quarter'] == quarter_label]
 if not index_match.empty:
     resale_index_value = float(index_match['index'].iloc[0])
 else:
-    resale_index_value = df_resale_index['index'].mean()
+    # If predicting future: use last known resale index as proxy
+    resale_index_value = float(df_resale_index['index'].iloc[-1])
+
+print(f"[DEBUG] Features for model: year_completed={year_completed}, total_dwelling_units={total_dwelling_units}, resale_index_value={resale_index_value}")
 
 # Build model input:
 encoded_input = pd.DataFrame([{
@@ -129,9 +149,15 @@ encoded_input = pd.DataFrame([{
     'index': resale_index_value
 }])
 
+print("[DEBUG] Encoded input for model:")
+print(encoded_input)
+
+# Prediction trigger
 if st.sidebar.button("💡 Predict Price"):
     predicted_price = model.predict(encoded_input)[0]
     st.sidebar.success(f"💰 SGD ${predicted_price:,.2f}")
+    print(f"[DEBUG] Prediction output: {predicted_price}")
+
     with mlflow.start_run():
         mlflow.log_params(encoded_input.to_dict('records')[0])
         mlflow.log_metric("predicted_price", predicted_price)
