@@ -189,16 +189,27 @@ def get_model_metrics():
     metrics_sources = {}
     
     try:
-        # First try metrics_log.json (training metrics)
+        # First try lstm_cleaned_data_info.json (most recent training with cleaned data)
+        cleaned_info_file = os.path.join("models", "lstm_cleaned_data_info.json")
+        if os.path.exists(cleaned_info_file):
+            with open(cleaned_info_file, 'r') as f:
+                cleaned_info = json.load(f)
+                metrics_sources['lstm_cleaned_data_info'] = cleaned_info.get('metrics', {})
+                print(f"Loaded metrics from lstm_cleaned_data_info.json: {metrics_sources['lstm_cleaned_data_info']}")
+        
+        # Try metrics_log.json (training metrics)
         metrics_file = os.path.join("models", "metrics_log.json")
         if os.path.exists(metrics_file):
             with open(metrics_file, 'r') as f:
                 metrics_log = json.load(f)
             
-            # Find the metrics for the specified model
-            for entry in metrics_log:
-                if entry['model_type'] == model_type:
-                    metrics_sources['metrics_log'] = entry.get('metrics', {})
+            # Find the most recent LSTM metrics
+            lstm_entries = [entry for entry in metrics_log if entry['model_type'] == model_type]
+            if lstm_entries:
+                # Get the most recent entry
+                latest_entry = max(lstm_entries, key=lambda x: x.get('timestamp', ''))
+                metrics_sources['metrics_log'] = latest_entry.get('metrics', {})
+                print(f"Loaded metrics from metrics_log.json: {metrics_sources['metrics_log']}")
         
         # Then try lstm_info.json (evaluation metrics)
         model_info_file = os.path.join("models", f"{model_type}_info.json")
@@ -206,10 +217,15 @@ def get_model_metrics():
             with open(model_info_file, 'r') as f:
                 model_info = json.load(f)
                 metrics_sources['lstm_info'] = model_info.get('metrics', {})
+                print(f"Loaded metrics from lstm_info.json: {metrics_sources['lstm_info']}")
         
+        print(f"All metrics sources: {list(metrics_sources.keys())}")
         return metrics_sources
+        
     except Exception as e:
         st.error(f"Error loading metrics: {e}")
+        import traceback
+        st.code(traceback.format_exc())
     
     return {}
 
@@ -565,110 +581,153 @@ elif page == "Model Statistics":
         if os.path.exists(data_path):
             data = load_data(data_path)
             
-            # Get metrics for LSTM model from both sources
+            # Get metrics for LSTM model from all sources
             metrics_sources = get_model_metrics()
             
-            # Add tabs to show both sets of metrics
-            tabs = st.tabs(["Evaluation Metrics", "Training Metrics", "Comparison"])
+            # Debug information
+            with st.expander("Debug: Available Metrics Files"):
+                st.write("Available metrics sources:", list(metrics_sources.keys()))
+                for source, metrics in metrics_sources.items():
+                    st.write(f"{source}:", metrics)
             
-            # Evaluation metrics tab (from lstm_info.json)
-            with tabs[0]:
-                if 'lstm_info' in metrics_sources:
-                    metrics = metrics_sources['lstm_info']
-                    st.subheader("Evaluation Metrics (from lstm_info.json)")
+            # Add tabs to show metrics from different sources
+            available_tabs = []
+            if 'lstm_cleaned_data_info' in metrics_sources:
+                available_tabs.append("Latest Evaluation")
+            if 'lstm_info' in metrics_sources:
+                available_tabs.append("Standard Evaluation")
+            if 'metrics_log' in metrics_sources:
+                available_tabs.append("Training Metrics")
+            available_tabs.append("Comparison")
+            
+            tabs = st.tabs(available_tabs)
+            tab_index = 0
+            
+            # Latest evaluation metrics tab (from lstm_cleaned_data_info.json)
+            if 'lstm_cleaned_data_info' in metrics_sources:
+                with tabs[tab_index]:
+                    metrics = metrics_sources['lstm_cleaned_data_info']
+                    st.subheader("Latest Evaluation Metrics (Cleaned Data)")
                     
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("RMSE", f"{metrics.get('rmse', 'N/A'):.2f}" if 'rmse' in metrics else "N/A")
-                    with col2:
-                        st.metric("MAPE", f"{metrics.get('mape', 'N/A'):.2f}%" if 'mape' in metrics else "N/A")
-                    with col3:
-                        # Use actual PICP from metrics instead of hardcoded value
-                        picp_value = metrics.get('picp', 0.0)
-                        st.metric("PICP", f"{picp_value*100:.1f}%" if isinstance(picp_value, (int, float)) else "N/A")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("R² Score", f"{metrics.get('r2', 'N/A'):.4f}" if 'r2' in metrics else "N/A")
-                    with col2:
-                        mpiw_value = metrics.get('mpiw', 0.0)
-                        st.metric("MPIW", f"{mpiw_value:.2f}" if isinstance(mpiw_value, (int, float)) else "N/A")
-                    
-                    # Show feature importance if available
-                    if 'feature_importance' in metrics:
-                        st.subheader("Feature Importance")
-                        feature_imp = metrics['feature_importance']
-                        feature_df = pd.DataFrame({
-                            'Feature': list(feature_imp.keys()),
-                            'Importance': list(feature_imp.values())
-                        }).sort_values('Importance', ascending=False)
+                    if metrics:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            rmse_val = metrics.get('rmse', 0)
+                            st.metric("RMSE", f"{rmse_val:.2f}" if rmse_val > 0 else "N/A")
+                        with col2:
+                            mape_val = metrics.get('mape', 0)
+                            st.metric("MAPE", f"{mape_val:.2f}%" if mape_val > 0 else "N/A")
+                        with col3:
+                            r2_val = metrics.get('r2', 0)
+                            st.metric("R² Score", f"{r2_val:.4f}" if r2_val != 0 else "N/A")
                         
-                        fig = px.bar(feature_df, x='Feature', y='Importance', title="Feature Importance")
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning("No evaluation metrics found in lstm_info.json")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            picp_val = metrics.get('picp', 0)
+                            st.metric("PICP", f"{picp_val*100:.1f}%" if picp_val > 0 else "N/A")
+                        with col2:
+                            mpiw_val = metrics.get('mpiw', 0)
+                            st.metric("MPIW", f"{mpiw_val:.2f}" if mpiw_val > 0 else "N/A")
+                    else:
+                        st.warning("No metrics found in latest evaluation file")
                     
-            # Training metrics tab (from metrics_log.json)
-            with tabs[1]:
-                if 'metrics_log' in metrics_sources:
-                    metrics = metrics_sources['metrics_log']
-                    st.subheader("Training Metrics (from metrics_log.json)")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("RMSE", f"{metrics.get('rmse', 'N/A'):.2f}" if 'rmse' in metrics else "N/A")
-                    with col2:
-                        st.metric("MAPE", f"{metrics.get('mape', 'N/A'):.2f}%" if 'mape' in metrics else "N/A")
-                    with col3:
-                        st.metric("MAE", f"{metrics.get('mae', 'N/A'):.2f}" if 'mae' in metrics else "N/A")
-                    
-                    st.metric("R² Score", f"{metrics.get('r2', 'N/A'):.4f}" if 'r2' in metrics else "N/A")
-                    
-                    if 'mse' in metrics:
-                        st.metric("MSE", f"{metrics.get('mse', 'N/A'):.2f}")
-                else:
-                    st.warning("No training metrics found in metrics_log.json")
+                tab_index += 1
             
-            # Comparison tab to explain differences
-            with tabs[2]:
-                st.subheader("Understanding the Metrics Differences")
-                st.markdown("""
-                ### Why are the metrics different?
-
-                The two JSON files contain metrics calculated at different stages:
-
-                1. **metrics_log.json**: Contains metrics calculated during model training, typically on validation data.
-                
-                2. **lstm_info.json**: Contains metrics from a more comprehensive evaluation, including:
-                   - Prediction intervals (PICP, MPIW)
-                   - Feature importance analysis
-                   - Metrics on different test/evaluation data
-
-                #### Key differences:
-                - **RMSE**: 493.39 (training) vs 1082.76 (evaluation)
-                - **MAPE**: 14.94% (training) vs 38.39% (evaluation)
-                
-                The evaluation metrics are likely more representative of real-world performance, as they were calculated on separate test data or using a different evaluation methodology.
-                """)
-                
-                # Create comparison table
-                if 'metrics_log' in metrics_sources and 'lstm_info' in metrics_sources:
-                    training = metrics_sources['metrics_log']
-                    evaluation = metrics_sources['lstm_info']
+            # Standard evaluation metrics tab (from lstm_info.json)
+            if 'lstm_info' in metrics_sources:
+                with tabs[tab_index]:
+                    metrics = metrics_sources['lstm_info']
+                    st.subheader("Standard Evaluation Metrics")
                     
-                    compare_data = {
-                        'Metric': ['RMSE', 'MAPE', 'R²'],
-                        'Training Value': [
-                            f"{training.get('rmse', 'N/A'):.2f}",
-                            f"{training.get('mape', 'N/A'):.2f}%",
-                            f"{training.get('r2', 'N/A'):.4f}"
-                        ],
-                        'Evaluation Value': [
-                            f"{evaluation.get('rmse', 'N/A'):.2f}",
-                            f"{evaluation.get('mape', 'N/A'):.2f}%",
-                            f"{evaluation.get('r2', 'N/A'):.4f}"
-                        ]
-                    }
+                    if metrics:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            rmse_val = metrics.get('rmse', 0)
+                            st.metric("RMSE", f"{rmse_val:.2f}" if rmse_val > 0 else "N/A")
+                        with col2:
+                            mape_val = metrics.get('mape', 0)
+                            st.metric("MAPE", f"{mape_val:.2f}%" if mape_val > 0 else "N/A")
+                        with col3:
+                            r2_val = metrics.get('r2', 0)
+                            st.metric("R² Score", f"{r2_val:.4f}" if r2_val != 0 else "N/A")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            picp_val = metrics.get('picp', 0)
+                            st.metric("PICP", f"{picp_val*100:.1f}%" if picp_val > 0 else "N/A")
+                        with col2:
+                            mpiw_val = metrics.get('mpiw', 0)
+                            st.metric("MPIW", f"{mpiw_val:.2f}" if mpiw_val > 0 else "N/A")
+                    else:
+                        st.warning("No metrics found in standard evaluation file")
+                        
+                tab_index += 1
+            
+            # Training metrics tab (from metrics_log.json)
+            if 'metrics_log' in metrics_sources:
+                with tabs[tab_index]:
+                    metrics = metrics_sources['metrics_log']
+                    st.subheader("Training Metrics")
                     
-                    st.subheader("Metrics Comparison")
-                    st.table(pd.DataFrame(compare_data))
+                    if metrics:
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            rmse_val = metrics.get('rmse', 0)
+                            st.metric("RMSE", f"{rmse_val:.2f}" if rmse_val > 0 else "N/A")
+                        with col2:
+                            mape_val = metrics.get('mape', 0)
+                            st.metric("MAPE", f"{mape_val:.2f}%" if mape_val > 0 else "N/A")
+                        with col3:
+                            mae_val = metrics.get('mae', 0)
+                            st.metric("MAE", f"{mae_val:.2f}" if mae_val > 0 else "N/A")
+                        
+                        r2_val = metrics.get('r2', 0)
+                        st.metric("R² Score", f"{r2_val:.4f}" if r2_val != 0 else "N/A")
+                        
+                        if 'mse' in metrics:
+                            mse_val = metrics.get('mse', 0)
+                            st.metric("MSE", f"{mse_val:.2f}" if mse_val > 0 else "N/A")
+                    else:
+                        st.warning("No training metrics found")
+                        
+                tab_index += 1
+            
+            # Comparison tab
+            if len(available_tabs) > 1:
+                with tabs[-1]:  # Last tab is always comparison
+                    st.subheader("Understanding the Metrics")
+                    
+                    if not metrics_sources:
+                        st.warning("No metrics files found. Please train the model first.")
+                    else:
+                        # Create comparison table if we have multiple sources
+                        comparison_data = []
+                        
+                        for source_name, metrics in metrics_sources.items():
+                            if metrics:
+                                comparison_data.append({
+                                    'Source': source_name,
+                                    'RMSE': f"{metrics.get('rmse', 0):.2f}" if metrics.get('rmse', 0) > 0 else "N/A",
+                                    'MAPE': f"{metrics.get('mape', 0):.2f}%" if metrics.get('mape', 0) > 0 else "N/A",
+                                    'R²': f"{metrics.get('r2', 0):.4f}" if metrics.get('r2', 0) != 0 else "N/A",
+                                    'PICP': f"{metrics.get('picp', 0)*100:.1f}%" if metrics.get('picp', 0) > 0 else "N/A",
+                                    'MPIW': f"{metrics.get('mpiw', 0):.2f}" if metrics.get('mpiw', 0) > 0 else "N/A"
+                                })
+                        
+                        if comparison_data:
+                            st.subheader("Metrics Comparison")
+                            st.table(pd.DataFrame(comparison_data))
+                        
+                        st.markdown("""
+                        ### Metric Explanations:
+                        - **RMSE**: Root Mean Square Error - Lower is better
+                        - **MAPE**: Mean Absolute Percentage Error - Lower is better  
+                        - **R²**: Coefficient of determination - Higher is better (max 1.0)
+                        - **PICP**: Prediction Interval Coverage Probability - Should be around 95%
+                        - **MPIW**: Mean Prediction Interval Width - Lower is better
+                        
+                        ### File Sources:
+                        - **lstm_cleaned_data_info.json**: Latest training with cleaned data
+                        - **lstm_info.json**: Standard model evaluation
+                        - **metrics_log.json**: Training process metrics
+                        """)
