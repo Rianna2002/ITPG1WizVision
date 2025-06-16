@@ -10,3 +10,5 @@ joblib==1.2.0
 plotly==5.14.1
 scipy
 statsmodels
+seaborn
+openpyxl
