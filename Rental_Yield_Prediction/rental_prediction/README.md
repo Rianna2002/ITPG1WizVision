@@ -26,6 +26,8 @@ rental-prediction/
 ├── requirements.txt
 └── README.md
 ```
+## Data Source
+https://data.gov.sg/datasets/d_c9f57187485a850908655db0e8cfe651/view
 
 ## Setup and Installation
 
