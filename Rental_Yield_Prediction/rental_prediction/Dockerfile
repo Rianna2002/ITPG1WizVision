@@ -20,6 +20,7 @@ COPY . .
 
 # Create directories for models and data
 RUN mkdir -p models data
+COPY models/ /app/models/
 
 # Set environment variables
 ENV PYTHONPATH=/app
