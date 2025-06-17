@@ -1,0 +1,11 @@
+name: rental
+channels:
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+  - https://repo.anaconda.com/pkgs/msys2
+dependencies:
+  - python=3.9
+  - cudatoolkit==11.2.2
+  - cudnn==8.1.0.77
+prefix: C:\Users\brian\anaconda3\envs\rental
