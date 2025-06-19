@@ -48,7 +48,7 @@ https://data.gov.sg/datasets/d_c9f57187485a850908655db0e8cfe651/view
 
 4. Run the Docker container:
    ```bash
-   docker run -p 8501:8501 -p 5000:5000 rental-prediction
+   docker run -p 8501:8501 rental-prediction
    ```
 
 5. Access the application:
