@@ -148,7 +148,7 @@ if page == "Predict Resale Price":
         year_completed = lease_commence
         total_dwelling_units = 0
 
-    building_age = year - year_completed
+    building_age = max(0, year - year_completed)
     computed_remaining_lease = lease_commence + 99 - year
 
     # Resale Index Logic — extended for future mode
@@ -280,3 +280,4 @@ if page == "Dashboard":
 
     with col3:
         st.image("ARIMA_AVP.png", caption="ARIMA Actual vs Predicted", use_container_width=True)
+

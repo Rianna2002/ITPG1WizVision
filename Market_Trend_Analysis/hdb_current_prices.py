@@ -61,7 +61,7 @@ if selected_month != '':
                 if selected_flat_model != '':
                     filtered_df = filtered_df[filtered_df['flat_model'] == selected_flat_model]
 
-                    # STEP 6: Floor Area (cascading number input)
+                    # STEP 6: Floor Area input
                     floor_area_options = sorted(filtered_df['floor_area_sqm'].unique())
                     floor_area_min = int(min(floor_area_options))
                     floor_area_max = int(max(floor_area_options))
@@ -70,7 +70,7 @@ if selected_month != '':
 
                     filtered_df = filtered_df[filtered_df['floor_area_sqm'] == floor_area]
 
-                    # STEP 7: Lease Commence Year (cascading number input)
+                    # STEP 7: Lease Commence Year input
                     lease_year_options = sorted(filtered_df['lease_commence_date'].unique())
                     lease_year_min = int(min(lease_year_options))
                     lease_year_max = int(max(lease_year_options))
@@ -79,34 +79,11 @@ if selected_month != '':
 
                     filtered_df = filtered_df[filtered_df['lease_commence_date'] == lease_commence_year]
 
-                    # STEP 8: Transaction Year (cascading number input)
-                    trans_year_options = sorted(filtered_df['year'].unique())
-                    trans_year_min = int(min(trans_year_options))
-                    trans_year_max = int(max(trans_year_options))
-                    trans_year_default = trans_year_min
-                    transaction_year = st.number_input("Transaction Year", min_value=trans_year_min, max_value=trans_year_max, value=trans_year_default)
+                    # ✅ Final result
+                    if not filtered_df.empty:
+                        avg_resale_price = filtered_df['resale_price'].mean()
+                        st.success(f"Average Resale Price: ${avg_resale_price:,.2f}")
+                        st.dataframe(filtered_df)
+                    else:
+                        st.warning("None available")
 
-                    filtered_df = filtered_df[filtered_df['year'] == transaction_year]
-
-                    # STEP 9: Transaction Month (cascading dropdown)
-                    month_mapping = {
-                        1: 'January', 2: 'February', 3: 'March', 4: 'April',
-                        5: 'May', 6: 'June', 7: 'July', 8: 'August',
-                        9: 'September', 10: 'October', 11: 'November', 12: 'December'
-                    }
-                    trans_month_options = sorted(filtered_df['month_num'].unique())
-                    trans_month_names = [month_mapping[m] for m in trans_month_options]
-                    selected_trans_month = st.selectbox("Transaction Month", [''] + trans_month_names, format_func=lambda x: 'Select Transaction Month' if x == '' else x)
-
-                    if selected_trans_month != '':
-                        # Map back from month name to number
-                        month_num_selected = [k for k,v in month_mapping.items() if v == selected_trans_month][0]
-                        filtered_df = filtered_df[filtered_df['month_num'] == month_num_selected]
-
-                        # ✅ Final result
-                        if not filtered_df.empty:
-                            avg_resale_price = filtered_df['resale_price'].mean()
-                            st.success(f"Average Resale Price: ${avg_resale_price:,.2f}")
-                            st.dataframe(filtered_df)
-                        else:
-                            st.warning("None available")
