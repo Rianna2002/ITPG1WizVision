@@ -1,0 +1,21 @@
+{
+  "model_type": "lstm",
+  "params": {
+    "lstm_units": 512,
+    "dense_units": 256,
+    "dropout_rate": 0.3,
+    "learning_rate": 0.001,
+    "batch_size": 512,
+    "epochs": 30
+  },
+  "metrics": {
+    "mse": 166585.29487800936,
+    "rmse": 408.1486186158289,
+    "mae": 309.31749878817254,
+    "mape": 10.583274524319009,
+    "r2": 0.5939865241995514
+  },
+  "model_path": "models\\lstm_model.keras",
+  "feature_count": 3382,
+  "created_at": "2025-07-10T17:28:13.533389"
+}
