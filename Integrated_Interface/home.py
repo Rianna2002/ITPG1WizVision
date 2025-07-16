@@ -12,3 +12,4 @@ Welcome! Use the sidebar to navigate across various predictive tools and insight
 - 📦 Demand Forecasting  
 - 🏢 Rental Yield Prediction  
 """)
+
