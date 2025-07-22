@@ -3,13 +3,44 @@ import xgboost as xgb
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import boto3
+from io import StringIO
+import os
+
+# uncomment for local testing and edit .env file with access credentials
+
+#print("[DEBUG] Connecting to AWS S3...")
+#load_dotenv()
+
+#aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+#aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+#aws_session_token = os.getenv("AWS_SESSION_TOKEN")
+#aws_default_region = os.getenv("AWS_DEFAULT_REGION")
+
+# s3 = boto3.client(
+#     's3',
+#     aws_access_key_id=aws_access_key,
+#     aws_secret_access_key=aws_secret_key,
+#     aws_session_token=aws_session_token,
+#     region_name=aws_default_region
+# )
+
+s3 = boto3.client('s3')
+
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+
+bucket = 'aop-priceforecast-bucket'
 
 # Load trained XGBoost model
 xgb_model = xgb.Booster()
 xgb_model.load_model("models/propertypriceforecasting_xgboost_model.model")
 
 # Load previous month's resale prices (generated in notebook)
-prev_prices = pd.read_csv("data/prev_prices.csv")
+prev_prices = load_csv_from_s3(bucket, "prev_prices.csv")
 
 # Function to get previous resale price
 def get_prev_price(flat_type, year, month):

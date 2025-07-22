@@ -39,7 +39,7 @@ class RentalPredictor:
                 self.model.load_model(model_path)
                 
             elif model_type == "lstm":
-                from tensorflow.keras.models import load_model
+                from keras.models import load_model
                 # Try different possible paths for LSTM model
                 possible_paths = [
                     os.path.join(model_dir, "lstm_model.keras"),

@@ -4,6 +4,37 @@ import numpy as np
 import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 import datetime
+import boto3
+import pandas as pd
+from io import StringIO
+import os
+
+# print("[DEBUG] Connecting to AWS S3...")
+# load_dotenv()
+
+# aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+# aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+# aws_session_token = os.getenv("AWS_SESSION_TOKEN")
+# aws_default_region = os.getenv("AWS_DEFAULT_REGION")
+
+# s3 = boto3.client(
+#     's3',
+#     aws_access_key_id=aws_access_key,
+#     aws_secret_access_key=aws_secret_key,
+#     aws_session_token=aws_session_token,
+#     region_name=aws_default_region
+# )
+
+# Create a boto3 S3 client (credentials are provided automatically inside ECS if role is set)
+s3 = boto3.client('s3')
+
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+
+bucket = 'aop-mta-dataset'
 
 st.set_page_config(page_title="AOP Market Trend Analysis Tool", layout="wide")
 
@@ -37,7 +68,7 @@ le_flat_model = LabelEncoder().fit(flat_models)
 @st.cache_data
 def load_property_info():
     print("[DEBUG] Loading HDB Property Information...")
-    df_property = pd.read_csv('data/HDBPropertyInformation.csv')
+    df_property = load_csv_from_s3(bucket, 'HDBPropertyInformation.csv')
     df_property['block'] = df_property['blk_no'].astype(str).str.strip().str.upper()
     df_property['street_name'] = df_property['street'].astype(str).str.strip().str.upper()
     return df_property
@@ -45,7 +76,7 @@ def load_property_info():
 @st.cache_data
 def load_resale_index():
     print("[DEBUG] Loading Resale Index...")
-    df_resale_idx = pd.read_csv('data/HDBResalePriceIndex1Q2009100Quarterly.csv')
+    df_resale_idx = load_csv_from_s3(bucket,'HDBResalePriceIndex1Q2009100Quarterly.csv')
     return df_resale_idx
 
 df_property = load_property_info()
@@ -65,14 +96,19 @@ model = load_model()
 @st.cache_data
 def load_full_data():
     print("[DEBUG] Loading resale transaction data...")
-    dfs = [
-        pd.read_csv(f) for f in [
-            'data/Resale Flat Prices (Based on Approval Date), 1990 - 1999.csv',
-            'data/Resale Flat Prices (Based on Approval Date), 2000 - Feb 2012.csv',
-            'data/Resale Flat Prices (Based on Registration Date), From Mar 2012 to Dec 2014.csv',
-            'data/Resale Flat Prices (Based on Registration Date), From Jan 2015 to Dec 2016.csv',
-            'data/Resale flat prices based on registration date from Jan-2017 onwards.csv']
+
+    bucket_name = "aop-mta-dataset"
+
+    keys = [
+            'Resale Flat Prices (Based on Approval Date), 1990 - 1999.csv',
+            'Resale Flat Prices (Based on Approval Date), 2000 - Feb 2012.csv',
+            'Resale Flat Prices (Based on Registration Date), From Mar 2012 to Dec 2014.csv',
+            'Resale Flat Prices (Based on Registration Date), From Jan 2015 to Dec 2016.csv',
+            'Resale flat prices based on registration date from Jan-2017 onwards.csv'
     ]
+
+    dfs = [load_csv_from_s3(bucket, key) for key in keys]
+
     df = pd.concat(dfs, ignore_index=True)
     df['month'] = pd.to_datetime(df['month'])
     df['year'] = df['month'].dt.year

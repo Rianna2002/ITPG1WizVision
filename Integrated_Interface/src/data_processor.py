@@ -72,7 +72,7 @@ class DataProcessor:
         """
         print("\n" + "="*70)
         print("APPLYING 80% OF MEDIAN RULE OUTLIER FILTERING")
-        print("GROUP BY: TOWN → FLAT_TYPE")
+        print("GROUP BY: TOWN --> FLAT_TYPE")
         print("="*70)
         
         # Store original data statistics
@@ -101,7 +101,7 @@ class DataProcessor:
             town, flat_type = key
             threshold = median_price * 0.8
             count = group_counts[key]
-            print(f"  {town} - {flat_type}: {count} records, Median ${median_price:.0f} → 80% Threshold ${threshold:.0f}")
+            print(f"  {town} - {flat_type}: {count} records, Median ${median_price:.0f} --> 80% Threshold ${threshold:.0f}")
         
         # Process each town-flat_type combination
         total_outliers_removed = 0
@@ -258,7 +258,7 @@ class DataProcessor:
         """
         print("="*80)
         print("RENTAL DATA CLEANING AND PREPARATION PIPELINE")
-        print("80% OF MEDIAN RULE BY TOWN → FLAT_TYPE GROUPING")
+        print("80% OF MEDIAN RULE BY TOWN --> FLAT_TYPE GROUPING")
         print("="*80)
         
         # Load data if file path provided
@@ -578,7 +578,7 @@ class DataProcessor:
             'outlier_summary': self.outlier_summary,
             'retention_rate': (self.cleaned_data_stats['total_records'] / 
                              self.original_data_stats['total_records']) * 100,
-            'filtering_method': '80% of Median Rule (Group by Town → Flat Type)'
+            'filtering_method': '80% of Median Rule (Group by Town --> Flat Type)'
         }
         
         return summary

@@ -10,6 +10,35 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from src.data_processor import DataProcessor
 from src.predictor import RentalPredictor
+import boto3
+from io import StringIO
+
+# load_dotenv()
+
+# aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+# aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+# aws_session_token = os.getenv("AWS_SESSION_TOKEN")
+# aws_default_region = os.getenv("AWS_DEFAULT_REGION")
+
+# # Create a boto3 S3 client (credentials are provided automatically inside ECS if role is set)
+# s3 = boto3.client(
+#     's3',
+#     aws_access_key_id=aws_access_key,
+#     aws_secret_access_key=aws_secret_key,
+#     aws_session_token=aws_session_token,
+#     region_name=aws_default_region
+# )
+
+s3 = boto3.client('s3')
+
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+
+# Example usage:
+bucket = 'your-S3Bucket-Name'
 
 # Set page configuration
 st.set_page_config(
@@ -65,7 +94,7 @@ def load_model():
 @st.cache_data
 def load_data(file_path):
     try:
-        data = pd.read_csv(file_path)
+        data = load_csv_from_s3(bucket, file_path)
         return data
     except Exception as e:
         st.error(f"Error loading data: {e}")
@@ -324,7 +353,7 @@ if page == "Predict":
         # Input form
         with st.form("prediction_form"):
             # Get available towns and flat types from the data
-            data_path = "data/RentingOutofFlats2025.csv"
+            data_path = "RentingOutofFlats2025.csv"
             if os.path.exists(data_path):
                 data = load_data(data_path)
                 towns = sorted(data['town'].unique())
@@ -577,7 +606,7 @@ elif page == "Model Statistics":
         st.warning("LSTM model is not loaded. Please go to the Predict page to load the model first.")
     else:
         # Load data for feature analysis
-        data_path = "data/RentingOutofFlats2025.csv"
+        data_path = "RentingOutofFlats2025.csv"
         if os.path.exists(data_path):
             data = load_data(data_path)
             

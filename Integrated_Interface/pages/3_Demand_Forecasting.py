@@ -3,7 +3,38 @@ import pandas as pd
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
+import os
 from dateutil.relativedelta import relativedelta
+import boto3
+import pandas as pd
+from io import StringIO
+
+# === Load Environment Variables ===
+# load_dotenv()
+
+# aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
+# aws_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+# aws_session_token = os.getenv("AWS_SESSION_TOKEN")
+# aws_default_region = os.getenv("AWS_DEFAULT_REGION")
+
+# s3 = boto3.client(
+#     's3',
+#     aws_access_key_id=aws_access_key,
+#     aws_secret_access_key=aws_secret_key,
+#     aws_session_token=aws_session_token,
+#     region_name=aws_default_region
+# )
+
+s3 = boto3.client('s3')
+
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+
+# Example usage:
+bucket = 'aop-demand-forecast-dataset'
 
 # === Streamlit App Config ===
 st.set_page_config(layout="wide")
@@ -17,22 +48,33 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# === Code Improvement: Use absolute paths for robustness ===
+# Get the directory of the current script (e.g., .../pages)
+PAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Get the root directory of the Streamlit app (one level up from 'pages')
+APP_ROOT = os.path.dirname(PAGE_DIR)
+# Define a dedicated path for the images directory
+IMAGES_DIR = os.path.join(APP_ROOT, "images")
+# Define a dedicated path for the data directory
+DATA_DIR = os.path.join(APP_ROOT, "data")
+# ===
+
 st.title("📊 Fine-Tuned XGBoost Model Evaluation")
-st.image("images/model_metrics.png", caption="Evaluation Metrics and SHAP Summary")
+st.image(os.path.join(IMAGES_DIR, "model_metrics.png"), caption="Evaluation Metrics and SHAP Summary")
 st.subheader("📅 Monthly Aggregated – Actual vs Predicted")
-st.image("images/Total_VS_Predicted.png")
+st.image(os.path.join(IMAGES_DIR, "Total_VS_Predicted.png"))
 st.subheader("📍 Actual vs Predicted Scatter Plot")
-st.image("images/Actual_VS_Predicted_Scatterplot.png")
+st.image(os.path.join(IMAGES_DIR, "Actual_VS_Predicted_Scatterplot.png"))
 
 st.subheader("🌇️ Town-Level Prediction")
 
 # === Load Model and Stats ===
-model_bundle = joblib.load("models/xgboost_finetune_model.pkl")
+model_bundle = joblib.load(os.path.join(APP_ROOT, "models", "demandforecasting_best_xgb_model_finetuned_V10.pkl"))
 model = model_bundle["model"]
 features = model_bundle["features"]
 
 # === Load and Prepare Historical Data ===
-data = pd.read_csv("data/merged_hdb_resale_data_up_to_may2025_cleaned.csv", low_memory=False)
+data = load_csv_from_s3(bucket, "merged_hdb_resale_data_up_to_may2025_cleaned.csv")
 data['month'] = pd.to_datetime(data['month'])
 data = data.groupby(['month', 'town']).size().reset_index(name='transaction_count')
 data = data.sort_values(['town', 'month']).copy()
@@ -108,7 +150,7 @@ if "forecast_df" not in st.session_state:
     future_df["month_num"] = future_df["month"].dt.month
     future_df["month_name"] = future_df["month"].dt.strftime("%B")
 
-    hist_df = pd.read_csv("data/all_historical_predictions.csv")
+    hist_df = load_csv_from_s3(bucket, "all_historical_predictions.csv")
     hist_df["month"] = pd.to_datetime(hist_df["month"])
     hist_df["year"] = hist_df["month"].dt.year
     hist_df["month_num"] = hist_df["month"].dt.month
