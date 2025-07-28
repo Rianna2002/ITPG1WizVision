@@ -9,7 +9,9 @@ import boto3
 import pandas as pd
 from io import StringIO
 
-# === Load Environment Variables ===
+# from dotenv import load_dotenv
+
+# # === Load Environment Variables ===
 # load_dotenv()
 
 # aws_access_key = os.getenv("AWS_ACCESS_KEY_ID")
@@ -167,7 +169,10 @@ st.markdown("### 🔍 Filter Forecasts")
 with st.form("forecast_form"):
     forecast_df = st.session_state["forecast_df"]
     selected_town = st.selectbox("🏡 Select a Town", sorted(forecast_df["town"].unique()))
-    selected_year = st.selectbox("📅 Select Year", sorted(forecast_df["year"].unique()))
+    
+    year_options = sorted(forecast_df["year"].unique())
+    start_year = st.selectbox("📅 Start Year", year_options, index=0)
+    end_year = st.selectbox("📅 End Year", year_options, index=len(year_options)-1)
 
     month_names = ["January", "February", "March", "April", "May", "June", 
                    "July", "August", "September", "October", "November", "December"]
@@ -180,8 +185,10 @@ with st.form("forecast_form"):
 if submitted:
     start_month_num = month_names.index(start_month_name) + 1
     end_month_num = month_names.index(end_month_name) + 1
-    start_month = pd.to_datetime(f"{selected_year}-{start_month_num:02d}-01")
-    end_month = pd.to_datetime(f"{selected_year}-{end_month_num:02d}-01")
+    start_month = pd.to_datetime(f"{start_year}-{start_month_num:02d}-01")
+    end_month = pd.to_datetime(f"{end_year}-{end_month_num:02d}-01")
+
+
 
     if start_month > end_month:
         st.warning("⚠️ Start Month must be before End Month.")
@@ -208,19 +215,22 @@ if submitted:
         ax.plot(full_month_df["month"], full_month_df["predicted_transaction_count"], marker='o')
         ax.set_xlabel("Month")
         ax.set_ylabel("Predicted Transaction Count")
+        full_month_df["month_str"] = full_month_df["month"].dt.strftime("%Y-%m")
         ax.set_xticks(full_month_df["month"])
-        ax.set_xticklabels(full_month_df["month_name"], rotation=45)
+        ax.set_xticklabels(full_month_df["month_str"], rotation=45)
         ax.grid(True)
         st.pyplot(fig)
 
         st.markdown("### 📋 Forecast Table")
         table_df = full_month_df.copy()
         table_df["Year"] = table_df["month"].dt.year
+        table_df["Month"] = table_df["month"].dt.strftime("%Y-%m")
         table_df["Town"] = selected_town
+
         table_df.rename(columns={
-            "month": "Month",
             "month_num": "Month (Num)",
             "month_name": "Month (Name)",
             "predicted_transaction_count": "Predicted Transaction Count"
         }, inplace=True)
+
         st.dataframe(table_df[["Year", "Month", "Month (Num)", "Month (Name)", "Town", "Predicted Transaction Count"]])
