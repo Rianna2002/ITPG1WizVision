@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 import joblib
 from dateutil.relativedelta import relativedelta
-
+import boto3
+from io import StringIO
 st.title("📈 XGBoost Monthly Transaction Predictions per Town")
 
 st.markdown("""
@@ -15,14 +16,20 @@ st.markdown("""
         }
     </style>
 """, unsafe_allow_html=True)
-
+s3 = boto3.client('s3')
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+bucket = 'aop-demand-forecast-dataset'
 @st.cache_resource
 def load_model():
     return joblib.load("best_xgb_model.pkl")
 
 @st.cache_data
 def load_raw_data():
-    df = pd.read_csv("merged_hdb_resale_data.csv")
+    df = load_csv_from_s3(bucket,"merged_hdb_resale_data.csv")
     df['month'] = pd.to_datetime(df['month'], format='%Y-%m')
     return df
 

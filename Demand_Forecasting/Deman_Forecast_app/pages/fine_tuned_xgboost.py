@@ -4,7 +4,8 @@ import numpy as np
 import joblib
 import matplotlib.pyplot as plt
 from dateutil.relativedelta import relativedelta
-
+import boto3
+from io import StringIO
 # === Streamlit App Config ===
 st.set_page_config(layout="wide")
 st.markdown("""
@@ -26,13 +27,21 @@ st.image("Actual_VS_Predicted_Scatterplot.png")
 
 st.subheader("🌇️ Town-Level Prediction")
 
+s3 = boto3.client('s3')
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+bucket = 'aop-demand-forecast-dataset'
+
 # === Load Model and Stats ===
 model_bundle = joblib.load("xgboost_finetune_model.pkl")
 model = model_bundle["model"]
 features = model_bundle["features"]
 
 # === Load and Prepare Historical Data ===
-data = pd.read_csv("merged_hdb_resale_data_up_to_may2025_cleaned.csv")
+data = load_csv_from_s3(bucket,"merged_hdb_resale_data_up_to_may2025_cleaned.csv")
 data['month'] = pd.to_datetime(data['month'])
 data = data.groupby(['month', 'town']).size().reset_index(name='transaction_count')
 data = data.sort_values(['town', 'month']).copy()
@@ -108,7 +117,7 @@ if "forecast_df" not in st.session_state:
     future_df["month_num"] = future_df["month"].dt.month
     future_df["month_name"] = future_df["month"].dt.strftime("%B")
 
-    hist_df = pd.read_csv("all_historical_predictions.csv")
+    hist_df = load_csv_from_s3(bucket,"all_historical_predictions.csv")
     hist_df["month"] = pd.to_datetime(hist_df["month"])
     hist_df["year"] = hist_df["month"].dt.year
     hist_df["month_num"] = hist_df["month"].dt.month
@@ -125,7 +134,10 @@ st.markdown("### 🔍 Filter Forecasts")
 with st.form("forecast_form"):
     forecast_df = st.session_state["forecast_df"]
     selected_town = st.selectbox("🏡 Select a Town", sorted(forecast_df["town"].unique()))
-    selected_year = st.selectbox("📅 Select Year", sorted(forecast_df["year"].unique()))
+    
+    year_options = sorted(forecast_df["year"].unique())
+    start_year = st.selectbox("📅 Start Year", year_options, index=0)
+    end_year = st.selectbox("📅 End Year", year_options, index=len(year_options)-1)
 
     month_names = ["January", "February", "March", "April", "May", "June", 
                    "July", "August", "September", "October", "November", "December"]
@@ -138,8 +150,10 @@ with st.form("forecast_form"):
 if submitted:
     start_month_num = month_names.index(start_month_name) + 1
     end_month_num = month_names.index(end_month_name) + 1
-    start_month = pd.to_datetime(f"{selected_year}-{start_month_num:02d}-01")
-    end_month = pd.to_datetime(f"{selected_year}-{end_month_num:02d}-01")
+    start_month = pd.to_datetime(f"{start_year}-{start_month_num:02d}-01")
+    end_month = pd.to_datetime(f"{end_year}-{end_month_num:02d}-01")
+
+
 
     if start_month > end_month:
         st.warning("⚠️ Start Month must be before End Month.")
@@ -166,19 +180,22 @@ if submitted:
         ax.plot(full_month_df["month"], full_month_df["predicted_transaction_count"], marker='o')
         ax.set_xlabel("Month")
         ax.set_ylabel("Predicted Transaction Count")
+        full_month_df["month_str"] = full_month_df["month"].dt.strftime("%Y-%m")
         ax.set_xticks(full_month_df["month"])
-        ax.set_xticklabels(full_month_df["month_name"], rotation=45)
+        ax.set_xticklabels(full_month_df["month_str"], rotation=45)
         ax.grid(True)
         st.pyplot(fig)
 
         st.markdown("### 📋 Forecast Table")
         table_df = full_month_df.copy()
         table_df["Year"] = table_df["month"].dt.year
+        table_df["Month"] = table_df["month"].dt.strftime("%Y-%m")
         table_df["Town"] = selected_town
+
         table_df.rename(columns={
-            "month": "Month",
             "month_num": "Month (Num)",
             "month_name": "Month (Name)",
             "predicted_transaction_count": "Predicted Transaction Count"
         }, inplace=True)
+
         st.dataframe(table_df[["Year", "Month", "Month (Num)", "Month (Name)", "Town", "Predicted Transaction Count"]])

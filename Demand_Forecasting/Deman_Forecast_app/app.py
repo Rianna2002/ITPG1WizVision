@@ -6,6 +6,8 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 from tensorflow.keras.models import load_model
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+import boto3
+from io import StringIO
 st.markdown("""
     <style>
         .block-container {
@@ -24,12 +26,18 @@ def load_models():
     return xgb_model, lstm_model, arima_model
 
 xgb_model, lstm_model, arima_model = load_models()
-
+s3 = boto3.client('s3')
+# Helper function to load a CSV from S3
+def load_csv_from_s3(bucket_name, key):
+    response = s3.get_object(Bucket=bucket_name, Key=key)
+    content = response['Body'].read().decode('utf-8')
+    return pd.read_csv(StringIO(content))
+bucket = 'aop-demand-forecast-dataset'
 # Data Preprocessing Code
 @st.cache_data 
 def load_and_preprocess_data():
     # Load the dataset
-    data = pd.read_csv("merged_hdb_resale_data.csv")
+    data = load_csv_from_s3(bucket,"merged_hdb_resale_data.csv")
     data['month'] = pd.to_datetime(data['month'], format='%Y-%m')
 
     # Aggregate data: count the number of transactions per month per town
