@@ -2,7 +2,7 @@ import requests
 import json
 
 # API Gateway
-url = "https://7o46tv7u84.execute-api.ap-southeast-1.amazonaws.com/default/resaleprice-lambda-api/"
+url = 
 
 # JSON
 payload = {
